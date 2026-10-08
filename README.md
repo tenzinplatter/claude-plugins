@@ -9,7 +9,7 @@ Personal Claude Code plugins, published as a marketplace.
 ## Install
 
 ```
-/plugin install agenda --marketplace <owner>/claude-plugins
+/plugin install agenda --marketplace tenzinplatter/claude-plugins
 ```
 
 ## Develop
