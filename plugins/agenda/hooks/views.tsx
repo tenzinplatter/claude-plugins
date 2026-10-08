@@ -1,7 +1,18 @@
 import type { BoxProps, ButtonProps, ElementConstructor, RenderChildren, TextProps } from 'claude-code'
 
 import type { ArcContext, ArcSnapshot, ArcTodo, ClaudeTask, Mode, TaskStatus } from '../types'
-import { byProject, byStatus, dueGroup, groupByDue, latestNext, shortDate, wrapWords, type DueGroup } from './agenda'
+import {
+  byProject,
+  byStatus,
+  dueGroup,
+  focusSections,
+  groupByDue,
+  latestNext,
+  repoName,
+  shortDate,
+  wrapWords,
+  type DueGroup,
+} from './agenda'
 
 export type Kit = {
   Box: ElementConstructor<BoxProps>
@@ -22,6 +33,7 @@ export type RowEnv = {
   open: readonly string[]
   columns: number
   today: string
+  session: string
 }
 
 export const RIGHT_PADDING = 1
@@ -87,11 +99,17 @@ function ExpandableRow({ row, rowKey, marker, title, indent, isDim, trailing, de
   )
 }
 
-function todoDetails(todo: ArcTodo, today: string): string[] {
-  return [
-    todo.date === null ? 'no due date' : `due ${shortDate(todo.date, today)} (${todo.date})`,
-    todo.note === null ? 'manual todo' : todo.note,
-  ]
+const GLOBAL_TODOS = 'todos.md'
+
+function todoOrigin(todo: ArcTodo): string {
+  if (todo.repo !== null) return `repo ${repoName(todo.repo)}`
+  return todo.note === GLOBAL_TODOS ? 'global todo' : todo.note
+}
+
+function todoDetails(todo: ArcTodo, row: RowEnv): string[] {
+  const due = todo.date === null ? 'no due date' : `due ${shortDate(todo.date, row.today)} (${todo.date})`
+  const added = todo.session === null ? [] : [todo.session === row.session ? 'added this session' : 'added in another session']
+  return [due, todoOrigin(todo), ...added]
 }
 
 type TodoRowProps = { row: RowEnv; todo: ArcTodo; title: string; indent: number; glyph: string; withDate: boolean }
@@ -112,7 +130,7 @@ function TodoRow({ row, todo, title, indent, glyph, withDate }: TodoRowProps) {
       indent={indent}
       isDim={group === 'someday' && withDate}
       trailing={withDate && todo.date !== null ? { text: shortDate(todo.date, row.today), color: GROUP_COLOR[group] } : undefined}
-      details={todoDetails(todo, row.today)}
+      details={todoDetails(todo, row)}
       body={null}
     />
   )
@@ -221,21 +239,43 @@ function Section({ ui, label, color, children }: { ui: Kit; label: string; color
   )
 }
 
-function FocusHeader({ row, context }: { row: RowEnv; context: ArcContext | null }) {
+type FocusTodosProps = { row: RowEnv; label: string; color: TextProps['color']; listKey: string; todos: readonly ArcTodo[] }
+
+function FocusTodos({ row, label, color, listKey, todos }: FocusTodosProps) {
+  if (todos.length === 0) return null
+  return (
+    <Section ui={row.ui} label={label} color={color}>
+      <Ruled row={row} ruleKey={listKey} indent={0}>
+        {todos.map(todo => (
+          <TodoRow row={row} todo={todo} title={todo.text} indent={0} glyph="▢" withDate />
+        ))}
+      </Ruled>
+    </Section>
+  )
+}
+
+function focusTitle(context: ArcContext | null, repo: string | null): string {
+  if (context !== null) return `◉ FOCUS sc-${context.story.id}`
+  return repo === null ? '◉ FOCUS' : `◉ FOCUS ${repoName(repo)}`
+}
+
+function FocusHeader({ row, context, repo }: { row: RowEnv; context: ArcContext | null; repo: string | null }) {
   const { Box, Text } = row.ui
   const next = context === null ? null : latestNext(context.sessions)
   return (
     <Box flexDirection="column">
       <Box backgroundColor="claude" paddingX={1} justifyContent="space-between">
         <Text color="inverseText" bold>
-          {context === null ? '◉ FOCUS' : `◉ FOCUS sc-${context.story.id}`}
+          {focusTitle(context, repo)}
         </Text>
         <Text color="inverseText">{context?.story.state ?? ''}</Text>
       </Box>
       <Controls row={row} mode="focus" />
       <HeaderRule row={row} glyph="━" color="claude" />
       {context === null ? (
-        <Text dimColor>no arc story for this branch</Text>
+        <Text dimColor wrap="truncate-middle">
+          {repo ?? 'not in a git repo'}
+        </Text>
       ) : (
         <Box flexDirection="column">
           <Text bold wrap="wrap">
@@ -262,10 +302,13 @@ export function FocusView({ row, arc, tasks }: { row: RowEnv; arc: ArcSnapshot; 
   const { ui } = row
   const { Box, Text } = ui
   const context = arc.kind === 'loaded' ? arc.context : null
-  const storyTodos = arc.kind === 'loaded' && context !== null ? arc.todos.filter(t => t.note === context.note) : []
+  const repo = arc.kind === 'loaded' ? arc.repo : null
+  const place = { session: row.session, storyNote: context?.note ?? null, repo }
+  const sections = focusSections(arc.kind === 'loaded' ? arc.todos : [], place)
+  const isEmpty = tasks.length + sections.session.length + sections.story.length + sections.repo.length === 0
   return (
     <Box key="focus" flexDirection="column" paddingRight={RIGHT_PADDING}>
-      <FocusHeader row={row} context={context} />
+      <FocusHeader row={row} context={context} repo={repo} />
       {tasks.length > 0 && (
         <Section ui={ui} label="CLAUDE · THIS SESSION" color="claude">
           <Ruled row={row} ruleKey="tasks" indent={0}>
@@ -275,12 +318,16 @@ export function FocusView({ row, arc, tasks }: { row: RowEnv; arc: ArcSnapshot; 
           </Ruled>
         </Section>
       )}
-      {storyTodos.length > 0 && (
-        <Section ui={ui} label="STORY TODOS" color="text">
-          <ProjectGroups row={row} todos={storyTodos} groupKey="story" glyph="▢" withDate={false} />
-        </Section>
-      )}
-      {tasks.length === 0 && storyTodos.length === 0 && (
+      <FocusTodos row={row} label="ADDED THIS SESSION" color="claude" listKey="session" todos={sections.session} />
+      <FocusTodos row={row} label="STORY TODOS" color="text" listKey="story" todos={sections.story} />
+      <FocusTodos
+        row={row}
+        label={`REPO · ${repoName(repo ?? '')}`}
+        color="text"
+        listKey="repo"
+        todos={sections.repo}
+      />
+      {isEmpty && (
         <Box marginTop={1}>
           <Text dimColor>nothing in focus yet</Text>
         </Box>

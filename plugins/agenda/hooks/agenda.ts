@@ -121,7 +121,26 @@ function prefixOf(text: string): { project: string; rest: string } | null {
   return match === null ? null : { project: match[1] ?? '', rest: match[2] ?? '' }
 }
 
+export function repoName(repo: string): string {
+  return repo.split('/').filter(Boolean).at(-1) ?? repo
+}
+
 export function byProject(todos: readonly ArcTodo[]): ProjectGroup[] {
+  const inRepo = todos.filter(todo => todo.repo !== null)
+  const repos = [...new Set(inRepo.map(todo => repoName(todo.repo ?? '')))].sort()
+  const repoGroups = repos.map(project => ({
+    project,
+    rows: inRepo.filter(todo => repoName(todo.repo ?? '') === project).map(todo => ({ todo, title: todo.text })),
+  }))
+  const prefixGroups = byPrefix(todos.filter(todo => todo.repo === null))
+  const loose = prefixGroups.filter(group => group.project === null)
+  const named = [...prefixGroups.filter(group => group.project !== null), ...repoGroups].sort((a, b) =>
+    (a.project ?? '').localeCompare(b.project ?? ''),
+  )
+  return [...loose, ...named]
+}
+
+function byPrefix(todos: readonly ArcTodo[]): ProjectGroup[] {
   const split = todos.map(todo => ({ todo, prefix: prefixOf(todo.text) }))
   const named = split.flatMap(({ prefix }) => (prefix === null ? [] : [prefix.project]))
   const shared = new Set(named.filter((project, i) => named.indexOf(project) !== i))
@@ -135,4 +154,16 @@ export function byProject(todos: readonly ArcTodo[]): ProjectGroup[] {
     rows: rows.filter(row => row.project === project).map(({ todo, title }) => ({ todo, title })),
   })
   return [group(null), ...[...shared].sort().map(group)].filter(g => g.rows.length > 0)
+}
+
+export type FocusPlace = { session: string; storyNote: string | null; repo: string | null }
+export type FocusSections = { session: ArcTodo[]; story: ArcTodo[]; repo: ArcTodo[] }
+
+export function focusSections(todos: readonly ArcTodo[], place: FocusPlace): FocusSections {
+  const session = todos.filter(todo => todo.session === place.session)
+  const rest = todos.filter(todo => todo.session !== place.session)
+  const story = place.storyNote === null ? [] : rest.filter(todo => todo.note === place.storyNote)
+  const repo =
+    place.repo === null ? [] : rest.filter(todo => todo.note !== place.storyNote && todo.repo === place.repo)
+  return { session, story, repo }
 }

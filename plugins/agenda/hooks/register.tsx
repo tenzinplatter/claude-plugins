@@ -95,7 +95,7 @@ export const register: Register = (on, options) => {
       case 'add': {
         const parsed = parseAddArgs(rest.join(' '))
         if (parsed === null) return { text: USAGE }
-        await writeArc($, addArgv(parsed.text, parsed.date))
+        await writeArc($, addArgv(parsed.text, parsed.date, await $.session.id()))
         await refreshIfOpen($)
         return { text: `Added: ${parsed.text}${parsed.date === null ? '' : ` (due ${parsed.date})`}` }
       }
@@ -128,6 +128,14 @@ export const register: Register = (on, options) => {
     return ran
   }).catch(($, e, next) => next(e))
 
+  on('tool.call', { tool: 'mcp__arc__add_todo' }, async ($, e, next) =>
+    next({
+      ...e,
+      session_id: e.session_id ?? (await $.session.id()),
+      cwd: e.cwd ?? (await $.session.cwd()),
+    }),
+  ).catch(($, e, next) => next(e))
+
   on('tool.call', async ($, e, next) => {
     const ran = await next(e)
     if (e.tool === 'Bash' || String(e.tool).startsWith('mcp__arc__')) void refreshIfOpen($)
@@ -139,7 +147,8 @@ export const register: Register = (on, options) => {
     const ui = { Box, Text, Button }
     const snapshot = await read($, arc)
     const chosen = await read($, mode)
-    const shown: Mode = chosen ?? (snapshot.kind === 'loaded' && snapshot.context !== null ? 'focus' : 'overview')
+    const isSomewhere = snapshot.kind === 'loaded' && (snapshot.context !== null || snapshot.repo !== null)
+    const shown: Mode = chosen ?? (isSomewhere ? 'focus' : 'overview')
     const actions: Actions = {
       complete: async id => {
         await writeArc($, doneArgv(id)).catch(error => $.ui.toast(`agenda: ${error instanceof Error ? error.message : error}`))
@@ -155,6 +164,7 @@ export const register: Register = (on, options) => {
       open: await read($, expanded),
       columns: e.props.bodyColumns - RIGHT_PADDING,
       today: localDate(await $.clock.now()),
+      session: await $.session.id(),
     }
     if (shown === 'focus') return <FocusView row={row} arc={snapshot} tasks={await read($, tasks)} />
     return <OverviewView row={row} arc={snapshot} />

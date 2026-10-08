@@ -1,9 +1,12 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On, ProcessRunResult } from 'claude-code'
 
-import { applyTaskCall, byProject, groupByDue, latestNext, parseAddArgs, wrapWords } from './agenda'
+import type { ArcTodo } from '../types'
+import { applyTaskCall, byProject, focusSections, groupByDue, latestNext, parseAddArgs, wrapWords } from './agenda'
 
 const TODAY = '2026-10-08'
+const SESSION = 'sess-here'
+const HEARTH = 'github.com/tenzinplatter/hearth'
 const PANE = {
   title: 'Agenda',
   isFocused: false,
@@ -23,24 +26,32 @@ const CONTEXT = {
   open_todos: [],
 }
 
-const TODOS = [
-  { id: 'a', text: 'benchmark at 720p', date: null, note: 'stories/depth-align.md' },
-  { id: 'b', text: 'book flights', date: '2026-10-08', note: null },
-  { id: 'c', text: 'reply re: epics', date: '2026-10-01', note: null },
-  { id: 'd', text: 'stockeye: Jetson: confirm calibration', date: null, note: null },
-  { id: 'e', text: 'stockeye: re-cut clips', date: null, note: null },
+function todo(id: string, text: string, fields: Partial<ArcTodo> = {}): ArcTodo {
+  return { id, text, date: null, note: 'todos.md', repo: null, session: null, ...fields }
+}
+
+const TODOS: ArcTodo[] = [
+  todo('a', 'benchmark at 720p', { note: 'stories/depth-align.md' }),
+  todo('b', 'book flights', { date: '2026-10-08' }),
+  todo('c', 'reply re: epics', { date: '2026-10-01' }),
+  todo('d', 'stockeye: Jetson: confirm calibration'),
+  todo('e', 'stockeye: re-cut clips'),
+  todo('f', 'wire the notifier', { note: 'todos/tenzinplatter-hearth.md', repo: HEARTH, session: 'sess-other' }),
+  todo('g', 'from this session', { note: 'todos/tenzinplatter-hearth.md', repo: HEARTH, session: SESSION }),
 ]
 
 function ran(stdout: string): { value: ProcessRunResult } {
   return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } as ProcessRunResult }
 }
 
-function fakeArc(on: On, { inStory }: { inStory: boolean }): string[][] {
+type Place = { inStory: boolean; repo?: string | null; listing?: unknown }
+
+function fakeArc(on: On, { inStory, repo = null, listing }: Place): string[][] {
   const calls: string[][] = []
   on('process.run', ($, e) => {
     calls.push([...e.argv])
     if (e.argv[1] === 'context') return ran(inStory ? JSON.stringify(CONTEXT) : '')
-    if (e.argv[2] === 'list') return ran(JSON.stringify(TODOS))
+    if (e.argv[2] === 'list') return ran(JSON.stringify(listing ?? { repo, todos: TODOS }))
     return ran('')
   })
   on('ui.panes', () => ({ value: [] }))
@@ -49,8 +60,14 @@ function fakeArc(on: On, { inStory }: { inStory: boolean }): string[][] {
     return { value: { isPlaced: true } }
   })
   on('command.register', ($, e) => ({ value: { command: e.name } }))
+  on('session.id', () => ({ value: SESSION }))
+  on('session.cwd', () => ({ value: '/home/t/code/hearth' }))
   mock.clock(on, { now: Date.parse(`${TODAY}T09:00:00`) })
   return calls
+}
+
+async function texts(ui: { findAll: (query: { type: 'Text' }) => Promise<{ text: string }[]> }): Promise<string[]> {
+  return (await ui.findAll({ type: 'Text' })).map(found => found.text)
 }
 
 describe('agenda logic', () => {
@@ -64,12 +81,24 @@ describe('agenda logic', () => {
     ).toEqual([{ id: 'todo-0', text: 'other', detail: null, status: 'pending' }])
   })
 
-  test('a prefix two todos share becomes a project and leaves their titles', () => {
-    const groups = byProject([...TODOS, { id: 'f', text: 'Note: lone prefix', date: null, note: null }])
+  test('repo todos group under their repo; unscoped ones by a shared prefix', () => {
+    const groups = byProject([...TODOS, todo('h', 'Note: lone prefix')])
     expect(groups.map(g => [g.project, g.rows.map(r => r.title)])).toEqual([
       [null, ['benchmark at 720p', 'book flights', 'reply re: epics', 'Note: lone prefix']],
+      ['hearth', ['wire the notifier', 'from this session']],
       ['stockeye', ['Jetson: confirm calibration', 're-cut clips']],
     ])
+  })
+
+  test('focus takes this session first, then the story, then the repo, each todo once', () => {
+    const sections = focusSections(TODOS, { session: SESSION, storyNote: 'stories/depth-align.md', repo: HEARTH })
+    expect([sections.session, sections.story, sections.repo].map(list => list.map(t => t.id))).toEqual([
+      ['g'],
+      ['a'],
+      ['f'],
+    ])
+    const nowhere = focusSections(TODOS, { session: 'none', storyNote: null, repo: null })
+    expect([nowhere.session, nowhere.story, nowhere.repo]).toEqual([[], [], []])
   })
 
   test('titles wrap on word boundaries and split words longer than a line', () => {
@@ -84,7 +113,7 @@ describe('agenda logic', () => {
     expect(groups).toEqual([
       ['overdue', ['c']],
       ['today', ['b']],
-      ['someday', ['a', 'd', 'e']],
+      ['someday', ['a', 'd', 'e', 'f', 'g']],
     ])
   })
 
@@ -102,19 +131,37 @@ describe('agenda logic', () => {
 
 describe('agenda pane', () => {
   for (const surface of ['terminal', 'desktop'] as const) {
-    test(`focus shows the story and Claude's tasks first (${surface})`, async ($, on) => {
-      fakeArc(on, { inStory: true })
+    test(`focus in a story shows Claude's tasks, then this session, the story and the repo (${surface})`, async ($, on) => {
+      fakeArc(on, { inStory: true, repo: HEARTH })
       on('tool.call', { tool: 'TaskCreate' }, () => ({ result: { task: { id: '1', subject: 'write tests' } } }))
       await $.command.run({ command: 'agenda', args: 'focus' } as never)
       await $.tool.call({ tool: 'TaskCreate', subject: 'write tests', description: 'd' })
 
       const ui = await $.ui.mount({ plugin: 'agenda', surface, component: 'Pane', requestId: 'agenda', props: PANE })
-      const texts = (await ui.findAll({ type: 'Text' })).map(found => found.text)
-      expect(texts).toContain('◉ FOCUS sc-7')
-      expect(texts).toContain('wire stereo config')
-      expect(texts.indexOf('CLAUDE · THIS SESSION')).toBeLessThan(texts.indexOf('STORY TODOS'))
+      const shown = await texts(ui)
+      expect(shown).toContain('◉ FOCUS sc-7')
+      expect(shown).toContain('wire stereo config')
+      const order = ['CLAUDE · THIS SESSION', 'ADDED THIS SESSION', 'STORY TODOS', 'REPO · hearth'].map(label =>
+        shown.indexOf(label),
+      )
+      expect(order.every(at => at >= 0)).toBe(true)
+      expect([...order].sort((x, y) => x - y)).toEqual(order)
       expect((await ui.find({ key: 'open:task:1' }))?.text).toBe('write tests')
+      expect((await ui.find({ key: 'open:todo:g' }))?.text).toBe('from this session')
       expect(await ui.find({ key: 'open:todo:b' })).toBeUndefined()
+      await ui.unmount()
+    })
+
+    test(`focus outside any story is headed by the repo (${surface})`, async ($, on) => {
+      fakeArc(on, { inStory: false, repo: HEARTH })
+      await $.command.run({ command: 'agenda', args: '' } as never)
+
+      const ui = await $.ui.mount({ plugin: 'agenda', surface, component: 'Pane', requestId: 'agenda', props: PANE })
+      const shown = await texts(ui)
+      expect(shown).toContain('◉ FOCUS hearth')
+      expect(shown).toContain(HEARTH)
+      expect(shown).not.toContain('STORY TODOS')
+      expect((await ui.find({ key: 'open:todo:f' }))?.text).toBe('wire the notifier')
       await ui.unmount()
     })
 
@@ -123,14 +170,14 @@ describe('agenda pane', () => {
       await $.command.run({ command: 'agenda', args: '' } as never)
 
       const ui = await $.ui.mount({ plugin: 'agenda', surface, component: 'Pane', requestId: 'agenda', props: PANE })
-      const texts = (await ui.findAll({ type: 'Text' })).map(found => found.text)
-      expect(texts).toContain('◇ overview')
-      expect(texts).toContain('overdue')
+      const shown = await texts(ui)
+      expect(shown).toContain('◇ overview')
+      expect(shown).toContain('overdue')
       expect((await ui.find({ key: 'open:todo:b' }))?.text).toBe('book flights')
-
-      expect(texts).toContain('stockeye')
+      expect(shown).toContain('stockeye')
+      expect(shown).toContain('hearth')
       expect((await ui.find({ key: 'open:todo:d' }))?.text).toBe('Jetson: confirm calibration')
-      expect(texts.some(text => text.startsWith('┈'))).toBe(true)
+      expect(shown.some(text => text.startsWith('┈'))).toBe(true)
 
       await ui.press({ key: 'done:b' })
       expect(calls).toContainEqual(['arc', 'todo', 'done', 'b'])
@@ -138,23 +185,26 @@ describe('agenda pane', () => {
     })
   }
 
-  test('pressing a row expands its details and pressing again collapses it', async ($, on) => {
-    fakeArc(on, { inStory: true })
+  test('an expanded row says where the todo came from and which session added it', async ($, on) => {
+    fakeArc(on, { inStory: true, repo: HEARTH })
     on('tool.call', { tool: 'TaskCreate' }, () => ({ result: { task: { id: '1', subject: 'write tests' } } }))
     await $.command.run({ command: 'agenda', args: 'focus' } as never)
     await $.tool.call({ tool: 'TaskCreate', subject: 'write tests', description: 'cover the pane on every surface' })
 
     const ui = await $.ui.mount({ plugin: 'agenda', surface: 'terminal', component: 'Pane', requestId: 'agenda', props: PANE })
-    const texts = async () => (await ui.findAll({ type: 'Text' })).map(found => found.text)
-    expect(await texts()).not.toContain('cover the pane on every surface')
+    expect(await texts(ui)).not.toContain('cover the pane on every surface')
 
     await ui.press({ key: 'open:task:1' })
-    expect(await texts()).toContain('cover the pane on every surface')
+    expect(await texts(ui)).toContain('cover the pane on every surface')
     await ui.press({ key: 'open:todo:a' })
-    expect(await texts()).toContain('no due date · stories/depth-align.md')
+    expect(await texts(ui)).toContain('no due date · stories/depth-align.md')
+    await ui.press({ key: 'open:todo:g' })
+    expect(await texts(ui)).toContain('no due date · repo hearth · added this session')
+    await ui.press({ key: 'open:todo:f' })
+    expect(await texts(ui)).toContain('no due date · repo hearth · added in another session')
 
     await ui.press({ key: 'open:task:1' })
-    expect(await texts()).not.toContain('cover the pane on every surface')
+    expect(await texts(ui)).not.toContain('cover the pane on every surface')
     await ui.unmount()
   })
 
@@ -178,14 +228,36 @@ describe('agenda pane', () => {
     expect((await ui.find({ key: 'open:todo:d' }))?.text).toBe('Jetson: confirm')
     expect((await ui.find({ key: 'open:todo:d:1' }))?.text).toBe('calibration')
     await ui.press({ key: 'open:todo:d:1' })
-    const texts = (await ui.findAll({ type: 'Text' })).map(found => found.text)
-    expect(texts).toContain('no due date · manual todo')
+    expect(await texts(ui)).toContain('no due date · global todo')
     await ui.unmount()
   })
 
-  test('add hands the text and date to arc', async ($, on) => {
+  test('add hands the text, date and this session to arc', async ($, on) => {
     const calls = fakeArc(on, { inStory: false })
     await $.command.run({ command: 'agenda', args: 'add book flights @2026-10-10' } as never)
-    expect(calls).toContainEqual(['arc', 'todo', 'add', 'book flights', '--date', '2026-10-10'])
+    expect(calls).toContainEqual(['arc', 'todo', 'add', 'book flights', '--session', SESSION, '--date', '2026-10-10'])
+  })
+
+  test("Claude's arc add_todo calls carry this session and its directory", async ($, on) => {
+    fakeArc(on, { inStory: false })
+    const seen: Record<string, unknown>[] = []
+    on('tool.call', { tool: 'mcp__arc__add_todo' }, ($, e) => {
+      seen.push({ ...e })
+      return { result: { content: [] } }
+    })
+    await $.tool.call({ tool: 'mcp__arc__add_todo', text: 'ship it' })
+    await $.tool.call({ tool: 'mcp__arc__add_todo', text: 'elsewhere', cwd: '/srv/other', session_id: 'given' })
+    expect(seen.map(e => [e.text, e.session_id, e.cwd])).toEqual([
+      ['ship it', SESSION, '/home/t/code/hearth'],
+      ['elsewhere', 'given', '/srv/other'],
+    ])
+  })
+
+  test('an arc that still prints a bare list says to reinstall it', async ($, on) => {
+    fakeArc(on, { inStory: false, listing: TODOS })
+    await $.command.run({ command: 'agenda', args: '' } as never)
+    const ui = await $.ui.mount({ plugin: 'agenda', surface: 'terminal', component: 'Pane', requestId: 'agenda', props: PANE })
+    expect((await texts(ui)).some(text => text.includes('reinstall'))).toBe(true)
+    await ui.unmount()
   })
 })

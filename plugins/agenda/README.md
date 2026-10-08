@@ -2,8 +2,8 @@
 
 A pane with two modes:
 
-- **focus**: full-width `claude`-coloured header bar and heavy rule. Shows the arc story for the current branch, the `Next` from its latest handoff, Claude's own tasks (mirrored live from `TaskCreate`/`TaskUpdate`/`TodoWrite`, in-progress first) and then the story note's open todos.
-- **overview**: quiet muted header and thin rule. Shows every open arc todo grouped by when it's due: overdue, today, this week, later, someday.
+- **focus**: full-width `claude`-coloured header bar and heavy rule. Headed by the arc story for the current branch, or the current git repo when there is no story. Lists Claude's own tasks (mirrored live from `TaskCreate`/`TaskUpdate`/`TodoWrite`, in-progress first), then todos added in this session, the story note's todos, and the rest of this repo's todos.
+- **overview**: quiet muted header and thin rule. Shows every open arc todo grouped by when it's due (overdue, today, this week, later, someday), then by repo, or by a shared `project:` prefix for todos outside any repo.
 
 It opens in focus when the branch resolves to a story, and in overview otherwise.
 
@@ -24,4 +24,4 @@ In the pane, titles wrap in full and the pane scrolls; click a title to expand i
 
 ## Requires
 
-`arc` on `PATH` with the `todo` subcommands (`arc todo list|add|done`). The pane refreshes every minute while open, and after Bash and `mcp__arc__*` tool calls.
+`arc` on `PATH` with repo-scoped todos (`arc todo list` printing `{ repo, todos }`). `/agenda add` and Claude's `add_todo` calls through arc's MCP server are tagged with this session and scoped to the session's repo. The pane refreshes every minute while open, and after Bash and `mcp__arc__*` tool calls.
