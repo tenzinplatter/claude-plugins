@@ -64,6 +64,7 @@ export const register: Register = on => {
       name: 'agenda',
       description: 'Toggle the agenda pane, or switch it to focus / overview',
       argumentHint: '[focus | overview | refresh | add <text> [@YYYY-MM-DD]]',
+      immediate: true,
     })
     $.clock.every(REFRESH_MS, () => void refreshIfOpen($))
     void refreshIfOpen($)
