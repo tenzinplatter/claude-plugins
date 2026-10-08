@@ -1,0 +1,11 @@
+{
+  "name": "tenzin-plugins",
+  "owner": { "name": "tenzinplatter" },
+  "plugins": [
+    {
+      "name": "agenda",
+      "source": "./plugins/agenda",
+      "description": "Toggleable agenda pane backed by arc: a focus view of the current story and Claude's tasks, and an overview of every open todo"
+    }
+  ]
+}

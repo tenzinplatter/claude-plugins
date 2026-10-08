@@ -1,0 +1,6 @@
+{
+  "name": "agenda",
+  "version": "0.1.0",
+  "description": "Toggleable agenda pane: a focus view of the current arc story and Claude's tasks, and an overview of every open todo",
+  "types": "./types/index.d.ts"
+}
