@@ -2,9 +2,9 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { ArcSnapshot, ClaudeTask, Mode } from '../types'
-import { applyTaskCall, localDate, parseAddArgs, type TaskCall } from './agenda'
+import { applyTaskCall, localDate, parseAddArgs, toggled, type TaskCall } from './agenda'
 import { CONTEXT_ARGV, INSTALL_HINT, LIST_ARGV, addArgv, doneArgv, failure, snapshotFrom } from './arc'
-import { FocusView, OverviewView, type Actions } from './views'
+import { FocusView, OverviewView, type Actions, type RowEnv } from './views'
 
 const PANE = 'agenda'
 const REFRESH_MS = 60_000
@@ -14,6 +14,7 @@ const USAGE = 'Usage: /agenda [focus | overview | refresh | add <text> [@YYYY-MM
 const mode = atom({ plugin: 'agenda', key: 'mode' } as const, null as Mode | null)
 const tasks = atom({ plugin: 'agenda', key: 'tasks' } as const, [] as ClaudeTask[])
 const arc = atom({ plugin: 'agenda', key: 'arc' } as const, { kind: 'loading' } as ArcSnapshot)
+const expanded = atom({ plugin: 'agenda', key: 'expanded' } as const, [] as string[])
 
 async function isOpen($: EngineInterface): Promise<boolean> {
   return (await $.ui.panes()).some(pane => pane.id === PANE)
@@ -111,7 +112,7 @@ export const register: Register = on => {
   on('tool.call', { tool: 'TaskCreate' }, async ($, e, next) => {
     const ran = await next(e)
     if (e.agentId === undefined && ran.deny === undefined && ran.isError !== true) {
-      await trackTasks($, { tool: 'TaskCreate', id: ran.result.task.id, subject: ran.result.task.subject })
+      await trackTasks($, { tool: 'TaskCreate', id: ran.result.task.id, subject: ran.result.task.subject, detail: e.description })
     }
     return ran
   }).catch(($, e, next) => next(e))
@@ -119,7 +120,7 @@ export const register: Register = on => {
   on('tool.call', { tool: 'TaskUpdate' }, async ($, e, next) => {
     const ran = await next(e)
     if (e.agentId === undefined && ran.deny === undefined && ran.isError !== true && ran.result.success) {
-      await trackTasks($, { tool: 'TaskUpdate', id: e.taskId, subject: e.subject, status: e.status })
+      await trackTasks($, { tool: 'TaskUpdate', id: e.taskId, subject: e.subject, detail: e.description, status: e.status })
     }
     return ran
   }).catch(($, e, next) => next(e))
@@ -141,12 +142,18 @@ export const register: Register = on => {
         await writeArc($, doneArgv(id)).catch(error => $.ui.toast(`agenda: ${error instanceof Error ? error.message : error}`))
         await refresh($)
       },
+      toggle: key => update($, expanded, keys => toggled(keys, key)).then(() => undefined),
       switchTo: next => update($, mode, () => next).then(() => undefined),
       refresh: () => refresh($),
     }
-    if (shown === 'focus') {
-      return <FocusView ui={ui} arc={snapshot} tasks={await read($, tasks)} actions={actions} />
+    const row: RowEnv = {
+      ui,
+      actions,
+      open: await read($, expanded),
+      columns: e.props.bodyColumns,
+      today: localDate(await $.clock.now()),
     }
-    return <OverviewView ui={ui} arc={snapshot} today={localDate(await $.clock.now())} actions={actions} />
+    if (shown === 'focus') return <FocusView row={row} arc={snapshot} tasks={await read($, tasks)} />
+    return <OverviewView row={row} arc={snapshot} />
   })
 }

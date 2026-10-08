@@ -1,7 +1,7 @@
 import type { BoxProps, ButtonProps, ElementConstructor, RenderChildren, TextProps } from 'claude-code'
 
-import type { ArcContext, ArcSnapshot, ClaudeTask, Mode, TaskStatus } from '../types'
-import { byStatus, groupByDue, latestNext, shortDate, type DueGroup } from './agenda'
+import type { ArcContext, ArcSnapshot, ArcTodo, ClaudeTask, Mode, TaskStatus } from '../types'
+import { byStatus, dueGroup, groupByDue, latestNext, shortDate, truncate, type DueGroup } from './agenda'
 
 export type Kit = {
   Box: ElementConstructor<BoxProps>
@@ -11,21 +11,130 @@ export type Kit = {
 
 export type Actions = {
   complete: (id: string) => Promise<void>
+  toggle: (key: string) => Promise<void>
   switchTo: (mode: Mode) => Promise<void>
   refresh: () => Promise<void>
 }
 
-const TASK_GLYPH: Record<TaskStatus, string> = { in_progress: '◐', pending: '▢', completed: '✔' }
+export type RowEnv = {
+  ui: Kit
+  actions: Actions
+  open: readonly string[]
+  columns: number
+  today: string
+}
 
-function Footer({ ui, mode, actions }: { ui: Kit; mode: Mode; actions: Actions }) {
-  const { Box, Button } = ui
+const FRAME_COLUMNS = 4
+const MARKER_COLUMNS = 2
+
+const TASK_GLYPH: Record<TaskStatus, string> = { in_progress: '◐', pending: '▢', completed: '✔' }
+const TASK_WORD: Record<TaskStatus, string> = { in_progress: 'in progress', pending: 'pending', completed: 'completed' }
+
+const GROUP_COLOR: Record<DueGroup, TextProps['color']> = {
+  overdue: 'error',
+  today: 'warning',
+  'this week': 'subtle',
+  later: 'subtle',
+  someday: 'inactive',
+}
+
+type RowProps = {
+  row: RowEnv
+  rowKey: string
+  marker: RenderChildren
+  title: string
+  isDim?: boolean
+  trailing?: { text: string; color: TextProps['color'] }
+  details: readonly string[]
+  body: string | null
+}
+
+function ExpandableRow({ row, rowKey, marker, title, isDim, trailing, details, body }: RowProps) {
+  const { Box, Text, Button } = row.ui
+  const isOpen = row.open.includes(rowKey)
+  const room = row.columns - FRAME_COLUMNS - MARKER_COLUMNS - (trailing === undefined ? 0 : trailing.text.length + 1)
+  const label = truncate(title, room)
+  const hidden = label === title ? null : title
+  return (
+    <Box key={`row:${rowKey}`} flexDirection="column">
+      <Box gap={1}>
+        {marker}
+        <Box flexGrow={1}>
+          <Button key={`open:${rowKey}`} plain dimColor={isDim} onPress={() => row.actions.toggle(rowKey)}>
+            {label}
+          </Button>
+        </Box>
+        {trailing !== undefined && <Text color={trailing.color}>{trailing.text}</Text>}
+      </Box>
+      {isOpen && (
+        <Box key={`detail:${rowKey}`} flexDirection="column" paddingLeft={MARKER_COLUMNS} marginBottom={1}>
+          {hidden !== null && <Text wrap="wrap">{hidden}</Text>}
+          {body !== null && <Text wrap="wrap">{body}</Text>}
+          <Text dimColor wrap="wrap">
+            {details.join(' · ')}
+          </Text>
+        </Box>
+      )}
+    </Box>
+  )
+}
+
+function todoDetails(todo: ArcTodo, today: string): string[] {
+  return [
+    todo.date === null ? 'no due date' : `due ${shortDate(todo.date, today)} (${todo.date})`,
+    todo.note === null ? 'manual todo' : todo.note,
+  ]
+}
+
+function TodoRow({ row, todo, glyph, withDate }: { row: RowEnv; todo: ArcTodo; glyph: string; withDate: boolean }) {
+  const { Button } = row.ui
+  const group = dueGroup(todo.date, row.today)
+  return (
+    <ExpandableRow
+      row={row}
+      rowKey={`todo:${todo.id}`}
+      marker={
+        <Button key={`done:${todo.id}`} plain onPress={() => row.actions.complete(todo.id)}>
+          {glyph}
+        </Button>
+      }
+      title={todo.text}
+      isDim={group === 'someday' && withDate}
+      trailing={withDate && todo.date !== null ? { text: shortDate(todo.date, row.today), color: GROUP_COLOR[group] } : undefined}
+      details={todoDetails(todo, row.today)}
+      body={null}
+    />
+  )
+}
+
+function TaskRow({ row, task }: { row: RowEnv; task: ClaudeTask }) {
+  const { Text } = row.ui
+  return (
+    <ExpandableRow
+      row={row}
+      rowKey={`task:${task.id}`}
+      marker={
+        <Text color={task.status === 'in_progress' ? 'claude' : undefined} dimColor={task.status === 'completed'}>
+          {TASK_GLYPH[task.status]}
+        </Text>
+      }
+      title={task.text}
+      isDim={task.status === 'completed'}
+      details={[TASK_WORD[task.status], 'Claude task']}
+      body={task.detail}
+    />
+  )
+}
+
+function Footer({ row, mode }: { row: RowEnv; mode: Mode }) {
+  const { Box, Button } = row.ui
   const other: Mode = mode === 'focus' ? 'overview' : 'focus'
   return (
     <Box marginTop={1} gap={1}>
-      <Button key="switch" hotkey={other[0]} onPress={() => actions.switchTo(other)}>
+      <Button key="switch" hotkey={other[0]} onPress={() => row.actions.switchTo(other)}>
         {other}
       </Button>
-      <Button key="refresh" hotkey="r" onPress={actions.refresh}>
+      <Button key="refresh" hotkey="r" onPress={row.actions.refresh}>
         refresh
       </Button>
     </Box>
@@ -86,8 +195,9 @@ function StoryHeader({ ui, context }: { ui: Kit; context: ArcContext | null }) {
   )
 }
 
-export function FocusView({ ui, arc, tasks, actions }: { ui: Kit; arc: ArcSnapshot; tasks: readonly ClaudeTask[]; actions: Actions }) {
-  const { Box, Text, Button } = ui
+export function FocusView({ row, arc, tasks }: { row: RowEnv; arc: ArcSnapshot; tasks: readonly ClaudeTask[] }) {
+  const { ui } = row
+  const { Box, Text } = ui
   const context = arc.kind === 'loaded' ? arc.context : null
   const storyTodos = arc.kind === 'loaded' && context !== null ? arc.todos.filter(t => t.note === context.note) : []
   return (
@@ -96,31 +206,14 @@ export function FocusView({ ui, arc, tasks, actions }: { ui: Kit; arc: ArcSnapsh
       {tasks.length > 0 && (
         <Section ui={ui} label="CLAUDE · THIS SESSION" color="claude">
           {byStatus(tasks).map(task => (
-            <Box key={`task:${task.id}`} gap={1}>
-              <Text color={task.status === 'in_progress' ? 'claude' : undefined} dimColor={task.status === 'completed'}>
-                {TASK_GLYPH[task.status]}
-              </Text>
-              <Text
-                wrap="truncate-end"
-                bold={task.status === 'in_progress'}
-                dimColor={task.status === 'completed'}
-                strikethrough={task.status === 'completed'}
-              >
-                {task.text}
-              </Text>
-            </Box>
+            <TaskRow row={row} task={task} />
           ))}
         </Section>
       )}
       {storyTodos.length > 0 && (
         <Section ui={ui} label="STORY TODOS" color="text">
           {storyTodos.map(todo => (
-            <Box key={`row:${todo.id}`} gap={1}>
-              <Button key={`done:${todo.id}`} plain onPress={() => actions.complete(todo.id)}>
-                ▢
-              </Button>
-              <Text wrap="truncate-end">{todo.text}</Text>
-            </Box>
+            <TodoRow row={row} todo={todo} glyph="▢" withDate={false} />
           ))}
         </Section>
       )}
@@ -130,21 +223,14 @@ export function FocusView({ ui, arc, tasks, actions }: { ui: Kit; arc: ArcSnapsh
         </Box>
       )}
       <ArcStatus ui={ui} arc={arc} />
-      <Footer ui={ui} mode="focus" actions={actions} />
+      <Footer row={row} mode="focus" />
     </Box>
   )
 }
 
-const GROUP_COLOR: Record<DueGroup, TextProps['color']> = {
-  overdue: 'error',
-  today: 'warning',
-  'this week': 'subtle',
-  later: 'subtle',
-  someday: 'inactive',
-}
-
-export function OverviewView({ ui, arc, today, actions }: { ui: Kit; arc: ArcSnapshot; today: string; actions: Actions }) {
-  const { Box, Text, Button } = ui
+export function OverviewView({ row, arc }: { row: RowEnv; arc: ArcSnapshot }) {
+  const { ui } = row
+  const { Box, Text } = ui
   const todos = arc.kind === 'loaded' ? arc.todos : []
   const context = arc.kind === 'loaded' ? arc.context : null
   return (
@@ -153,23 +239,13 @@ export function OverviewView({ ui, arc, today, actions }: { ui: Kit; arc: ArcSna
         <Text color="subtle">◇ overview</Text>
         <Text dimColor>{todos.length} open</Text>
       </Box>
-      {groupByDue(todos, today).map(([group, members]) => (
+      {groupByDue(todos, row.today).map(([group, members]) => (
         <Box key={`group:${group}`} flexDirection="column" marginTop={1}>
           <Text color={GROUP_COLOR[group]} italic>
             {group}
           </Text>
           {members.map(todo => (
-            <Box key={`row:${todo.id}`} gap={1}>
-              <Button key={`done:${todo.id}`} plain onPress={() => actions.complete(todo.id)}>
-                ○
-              </Button>
-              <Box flexGrow={1}>
-                <Text wrap="truncate-end" dimColor={group === 'someday'}>
-                  {todo.text}
-                </Text>
-              </Box>
-              {todo.date !== null && <Text color={GROUP_COLOR[group]}>{shortDate(todo.date, today)}</Text>}
-            </Box>
+            <TodoRow row={row} todo={todo} glyph="○" withDate />
           ))}
         </Box>
       ))}
@@ -186,7 +262,7 @@ export function OverviewView({ ui, arc, today, actions }: { ui: Kit; arc: ArcSna
         </Box>
       )}
       <ArcStatus ui={ui} arc={arc} />
-      <Footer ui={ui} mode="overview" actions={actions} />
+      <Footer row={row} mode="overview" />
     </Box>
   )
 }

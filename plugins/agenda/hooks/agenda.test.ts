@@ -1,10 +1,17 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On, ProcessRunResult } from 'claude-code'
 
-import { applyTaskCall, groupByDue, latestNext, parseAddArgs } from './agenda'
+import { applyTaskCall, groupByDue, latestNext, parseAddArgs, truncate } from './agenda'
 
 const TODAY = '2026-10-08'
-const PANE = { title: 'Agenda', isFocused: false, bodyColumns: 48, placement: 'dock' } as const
+const PANE = {
+  title: 'Agenda',
+  isFocused: false,
+  bodyColumns: 48,
+  placement: 'dock',
+  scroll: { offset: 0, bodyRows: 40 },
+  view: {},
+} as const
 
 const CONTEXT = {
   story: { id: 7, name: 'Depth alignment', state: 'In Progress', type: 'feature', url: 'https://app.shortcut.com/x/story/7' },
@@ -36,20 +43,25 @@ function fakeArc(on: On, { inStory }: { inStory: boolean }): string[][] {
   })
   on('ui.panes', () => ({ value: [] }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
-  on('command.register', () => ({ value: undefined }))
+  on('command.register', ($, e) => ({ value: { command: e.name } }))
   mock.clock(on, { now: Date.parse(`${TODAY}T09:00:00`) })
   return calls
 }
 
 describe('agenda logic', () => {
   test('tasks follow TaskCreate, TaskUpdate and TodoWrite', () => {
-    const created = applyTaskCall([], { tool: 'TaskCreate', id: '1', subject: 'write tests' })
+    const created = applyTaskCall([], { tool: 'TaskCreate', id: '1', subject: 'write tests', detail: 'cover the pane' })
     const started = applyTaskCall(created, { tool: 'TaskUpdate', id: '1', status: 'in_progress' })
-    expect(started).toEqual([{ id: '1', text: 'write tests', status: 'in_progress' }])
+    expect(started).toEqual([{ id: '1', text: 'write tests', detail: 'cover the pane', status: 'in_progress' }])
     expect(applyTaskCall(started, { tool: 'TaskUpdate', id: '1', status: 'deleted' })).toEqual([])
     expect(
       applyTaskCall(started, { tool: 'TodoWrite', todos: [{ content: 'other', status: 'pending' }] }),
-    ).toEqual([{ id: 'todo-0', text: 'other', status: 'pending' }])
+    ).toEqual([{ id: 'todo-0', text: 'other', detail: null, status: 'pending' }])
+  })
+
+  test('long titles are cut with an ellipsis', () => {
+    expect(truncate('short', 10)).toBe('short')
+    expect(truncate('a much longer title', 8)).toBe('a much …')
   })
 
   test('todos group by how soon they are due', () => {
@@ -86,8 +98,8 @@ describe('agenda pane', () => {
       expect(texts).toContain('◉ FOCUS sc-7')
       expect(texts).toContain('wire stereo config')
       expect(texts.indexOf('CLAUDE · THIS SESSION')).toBeLessThan(texts.indexOf('STORY TODOS'))
-      expect(texts).toContain('write tests')
-      expect(texts).not.toContain('book flights')
+      expect((await ui.find({ key: 'open:task:1' }))?.text).toBe('write tests')
+      expect(await ui.find({ key: 'open:todo:b' })).toBeUndefined()
       await ui.unmount()
     })
 
@@ -99,13 +111,33 @@ describe('agenda pane', () => {
       const texts = (await ui.findAll({ type: 'Text' })).map(found => found.text)
       expect(texts).toContain('◇ overview')
       expect(texts).toContain('overdue')
-      expect(texts).toContain('book flights')
+      expect((await ui.find({ key: 'open:todo:b' }))?.text).toBe('book flights')
 
       await ui.press({ key: 'done:b' })
       expect(calls).toContainEqual(['arc', 'todo', 'done', 'b'])
       await ui.unmount()
     })
   }
+
+  test('pressing a row expands its details and pressing again collapses it', async ($, on) => {
+    fakeArc(on, { inStory: true })
+    on('tool.call', { tool: 'TaskCreate' }, () => ({ result: { task: { id: '1', subject: 'write tests' } } }))
+    await $.command.run({ command: 'agenda', args: 'focus' } as never)
+    await $.tool.call({ tool: 'TaskCreate', subject: 'write tests', description: 'cover the pane on every surface' })
+
+    const ui = await $.ui.mount({ plugin: 'agenda', surface: 'terminal', component: 'Pane', requestId: 'agenda', props: PANE })
+    const texts = async () => (await ui.findAll({ type: 'Text' })).map(found => found.text)
+    expect(await texts()).not.toContain('cover the pane on every surface')
+
+    await ui.press({ key: 'open:task:1' })
+    expect(await texts()).toContain('cover the pane on every surface')
+    await ui.press({ key: 'open:todo:a' })
+    expect(await texts()).toContain('no due date · stories/depth-align.md')
+
+    await ui.press({ key: 'open:task:1' })
+    expect(await texts()).not.toContain('cover the pane on every surface')
+    await ui.unmount()
+  })
 
   test('add hands the text and date to arc', async ($, on) => {
     const calls = fakeArc(on, { inStory: false })

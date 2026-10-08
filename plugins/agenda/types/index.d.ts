@@ -2,7 +2,7 @@ export type Mode = 'focus' | 'overview'
 
 export type TaskStatus = 'pending' | 'in_progress' | 'completed'
 
-export type ClaudeTask = { id: string; text: string; status: TaskStatus }
+export type ClaudeTask = { id: string; text: string; detail: string | null; status: TaskStatus }
 
 export type ArcTodo = { id: string; text: string; date: string | null; note: string | null }
 
@@ -31,6 +31,7 @@ declare module 'claude-code' {
       mode: Mode | null
       tasks: ClaudeTask[]
       arc: ArcSnapshot
+      expanded: string[]
     }
   }
 }

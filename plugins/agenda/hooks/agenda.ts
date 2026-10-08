@@ -50,20 +50,22 @@ export function byStatus(tasks: readonly ClaudeTask[]): ClaudeTask[] {
 
 export type TaskCall =
   | { tool: 'TodoWrite'; todos: readonly { content: string; status: TaskStatus }[] }
-  | { tool: 'TaskCreate'; id: string; subject: string }
-  | { tool: 'TaskUpdate'; id: string; subject?: string; status?: TaskStatus | 'deleted' }
+  | { tool: 'TaskCreate'; id: string; subject: string; detail: string }
+  | { tool: 'TaskUpdate'; id: string; subject?: string; detail?: string; status?: TaskStatus | 'deleted' }
 
 export function applyTaskCall(tasks: readonly ClaudeTask[], call: TaskCall): ClaudeTask[] {
   switch (call.tool) {
     case 'TodoWrite':
-      return call.todos.map((todo, i) => ({ id: `todo-${i}`, text: todo.content, status: todo.status }))
+      return call.todos.map((todo, i) => ({ id: `todo-${i}`, text: todo.content, detail: null, status: todo.status }))
     case 'TaskCreate':
-      return [...tasks, { id: call.id, text: call.subject, status: 'pending' }]
+      return [...tasks, { id: call.id, text: call.subject, detail: call.detail.trim() || null, status: 'pending' }]
     case 'TaskUpdate': {
-      const { id, subject, status } = call
+      const { id, subject, detail, status } = call
       if (status === 'deleted') return tasks.filter(task => task.id !== id)
       return tasks.map(task =>
-        task.id === id ? { ...task, text: subject ?? task.text, status: status ?? task.status } : task,
+        task.id === id
+          ? { ...task, text: subject ?? task.text, detail: detail?.trim() || task.detail, status: status ?? task.status }
+          : task,
       )
     }
   }
@@ -85,4 +87,14 @@ export function latestNext(sessions: readonly string[]): string | null {
     if (line !== undefined) return line.slice('**Next:**'.length).trim()
   }
   return null
+}
+
+export function truncate(text: string, width: number): string {
+  const chars = [...text]
+  if (chars.length <= width) return text
+  return `${chars.slice(0, Math.max(1, width - 1)).join('')}…`
+}
+
+export function toggled(keys: readonly string[], key: string): string[] {
+  return keys.includes(key) ? keys.filter(k => k !== key) : [...keys, key]
 }
