@@ -4,7 +4,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { ArcSnapshot, ClaudeTask, Mode } from '../types'
 import { applyTaskCall, localDate, parseAddArgs, toggled, type TaskCall } from './agenda'
 import { CONTEXT_ARGV, INSTALL_HINT, LIST_ARGV, addArgv, doneArgv, failure, snapshotFrom } from './arc'
-import { FocusView, OverviewView, type Actions, type RowEnv } from './views'
+import { FocusView, OverviewView, RIGHT_PADDING, type Actions, type RowEnv } from './views'
 
 const PANE = 'agenda'
 const REFRESH_MS = 60_000
@@ -153,7 +153,7 @@ export const register: Register = (on, options) => {
       ui,
       actions,
       open: await read($, expanded),
-      columns: e.props.bodyColumns,
+      columns: e.props.bodyColumns - RIGHT_PADDING,
       today: localDate(await $.clock.now()),
     }
     if (shown === 'focus') return <FocusView row={row} arc={snapshot} tasks={await read($, tasks)} />

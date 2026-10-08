@@ -173,7 +173,7 @@ describe('agenda pane', () => {
   test('a long title wraps over several pressable lines', async ($, on) => {
     fakeArc(on, { inStory: false })
     await $.command.run({ command: 'agenda', args: '' } as never)
-    const narrow = { ...PANE, bodyColumns: 20 }
+    const narrow = { ...PANE, bodyColumns: 21 }
     const ui = await $.ui.mount({ plugin: 'agenda', surface: 'terminal', component: 'Pane', requestId: 'agenda', props: narrow })
     expect((await ui.find({ key: 'open:todo:d' }))?.text).toBe('Jetson: confirm')
     expect((await ui.find({ key: 'open:todo:d:1' }))?.text).toBe('calibration')

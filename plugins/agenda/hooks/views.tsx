@@ -24,6 +24,7 @@ export type RowEnv = {
   today: string
 }
 
+export const RIGHT_PADDING = 1
 const MARKER_COLUMNS = 2
 const PROJECT_INDENT = 1
 const RULE = '┈'
@@ -263,7 +264,7 @@ export function FocusView({ row, arc, tasks }: { row: RowEnv; arc: ArcSnapshot; 
   const context = arc.kind === 'loaded' ? arc.context : null
   const storyTodos = arc.kind === 'loaded' && context !== null ? arc.todos.filter(t => t.note === context.note) : []
   return (
-    <Box key="focus" flexDirection="column">
+    <Box key="focus" flexDirection="column" paddingRight={RIGHT_PADDING}>
       <FocusHeader row={row} context={context} />
       {tasks.length > 0 && (
         <Section ui={ui} label="CLAUDE · THIS SESSION" color="claude">
@@ -295,7 +296,7 @@ export function OverviewView({ row, arc }: { row: RowEnv; arc: ArcSnapshot }) {
   const todos = arc.kind === 'loaded' ? arc.todos : []
   const context = arc.kind === 'loaded' ? arc.context : null
   return (
-    <Box key="overview" flexDirection="column">
+    <Box key="overview" flexDirection="column" paddingRight={RIGHT_PADDING}>
       <Box justifyContent="space-between">
         <Text color="subtle" bold>
           ◇ overview
