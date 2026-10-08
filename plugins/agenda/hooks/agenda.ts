@@ -98,3 +98,29 @@ export function truncate(text: string, width: number): string {
 export function toggled(keys: readonly string[], key: string): string[] {
   return keys.includes(key) ? keys.filter(k => k !== key) : [...keys, key]
 }
+
+const PROJECT_PREFIX = /^([A-Za-z0-9][\w.-]{0,31}):\s+(\S.*)$/s
+
+export type ProjectRow = { todo: ArcTodo; title: string }
+export type ProjectGroup = { project: string | null; rows: ProjectRow[] }
+
+function prefixOf(text: string): { project: string; rest: string } | null {
+  const match = PROJECT_PREFIX.exec(text)
+  return match === null ? null : { project: match[1] ?? '', rest: match[2] ?? '' }
+}
+
+export function byProject(todos: readonly ArcTodo[]): ProjectGroup[] {
+  const split = todos.map(todo => ({ todo, prefix: prefixOf(todo.text) }))
+  const named = split.flatMap(({ prefix }) => (prefix === null ? [] : [prefix.project]))
+  const shared = new Set(named.filter((project, i) => named.indexOf(project) !== i))
+  const rows = split.map(({ todo, prefix }) =>
+    prefix !== null && shared.has(prefix.project)
+      ? { project: prefix.project, todo, title: prefix.rest }
+      : { project: null, todo, title: todo.text },
+  )
+  const group = (project: string | null): ProjectGroup => ({
+    project,
+    rows: rows.filter(row => row.project === project).map(({ todo, title }) => ({ todo, title })),
+  })
+  return [group(null), ...[...shared].sort().map(group)].filter(g => g.rows.length > 0)
+}

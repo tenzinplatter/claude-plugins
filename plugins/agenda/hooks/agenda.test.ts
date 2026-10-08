@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On, ProcessRunResult } from 'claude-code'
 
-import { applyTaskCall, groupByDue, latestNext, parseAddArgs, truncate } from './agenda'
+import { applyTaskCall, byProject, groupByDue, latestNext, parseAddArgs, truncate } from './agenda'
 
 const TODAY = '2026-10-08'
 const PANE = {
@@ -27,6 +27,8 @@ const TODOS = [
   { id: 'a', text: 'benchmark at 720p', date: null, note: 'stories/depth-align.md' },
   { id: 'b', text: 'book flights', date: '2026-10-08', note: null },
   { id: 'c', text: 'reply re: epics', date: '2026-10-01', note: null },
+  { id: 'd', text: 'stockeye: Jetson: confirm calibration', date: null, note: null },
+  { id: 'e', text: 'stockeye: re-cut clips', date: null, note: null },
 ]
 
 function ran(stdout: string): { value: ProcessRunResult } {
@@ -59,6 +61,14 @@ describe('agenda logic', () => {
     ).toEqual([{ id: 'todo-0', text: 'other', detail: null, status: 'pending' }])
   })
 
+  test('a prefix two todos share becomes a project and leaves their titles', () => {
+    const groups = byProject([...TODOS, { id: 'f', text: 'Note: lone prefix', date: null, note: null }])
+    expect(groups.map(g => [g.project, g.rows.map(r => r.title)])).toEqual([
+      [null, ['benchmark at 720p', 'book flights', 'reply re: epics', 'Note: lone prefix']],
+      ['stockeye', ['Jetson: confirm calibration', 're-cut clips']],
+    ])
+  })
+
   test('long titles are cut with an ellipsis', () => {
     expect(truncate('short', 10)).toBe('short')
     expect(truncate('a much longer title', 8)).toBe('a much …')
@@ -69,7 +79,7 @@ describe('agenda logic', () => {
     expect(groups).toEqual([
       ['overdue', ['c']],
       ['today', ['b']],
-      ['someday', ['a']],
+      ['someday', ['a', 'd', 'e']],
     ])
   })
 
@@ -112,6 +122,10 @@ describe('agenda pane', () => {
       expect(texts).toContain('◇ overview')
       expect(texts).toContain('overdue')
       expect((await ui.find({ key: 'open:todo:b' }))?.text).toBe('book flights')
+
+      expect(texts).toContain('stockeye')
+      expect((await ui.find({ key: 'open:todo:d' }))?.text).toBe('Jetson: confirm calibration')
+      expect(texts.some(text => text.startsWith('┈'))).toBe(true)
 
       await ui.press({ key: 'done:b' })
       expect(calls).toContainEqual(['arc', 'todo', 'done', 'b'])

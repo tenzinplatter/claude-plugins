@@ -1,7 +1,7 @@
 import type { BoxProps, ButtonProps, ElementConstructor, RenderChildren, TextProps } from 'claude-code'
 
 import type { ArcContext, ArcSnapshot, ArcTodo, ClaudeTask, Mode, TaskStatus } from '../types'
-import { byStatus, dueGroup, groupByDue, latestNext, shortDate, truncate, type DueGroup } from './agenda'
+import { byProject, byStatus, dueGroup, groupByDue, latestNext, shortDate, truncate, type DueGroup } from './agenda'
 
 export type Kit = {
   Box: ElementConstructor<BoxProps>
@@ -26,6 +26,8 @@ export type RowEnv = {
 
 const FRAME_COLUMNS = 4
 const MARKER_COLUMNS = 2
+const PROJECT_INDENT = 1
+const RULE = '┈'
 
 const TASK_GLYPH: Record<TaskStatus, string> = { in_progress: '◐', pending: '▢', completed: '✔' }
 const TASK_WORD: Record<TaskStatus, string> = { in_progress: 'in progress', pending: 'pending', completed: 'completed' }
@@ -43,16 +45,17 @@ type RowProps = {
   rowKey: string
   marker: RenderChildren
   title: string
+  indent: number
   isDim?: boolean
   trailing?: { text: string; color: TextProps['color'] }
   details: readonly string[]
   body: string | null
 }
 
-function ExpandableRow({ row, rowKey, marker, title, isDim, trailing, details, body }: RowProps) {
+function ExpandableRow({ row, rowKey, marker, title, indent, isDim, trailing, details, body }: RowProps) {
   const { Box, Text, Button } = row.ui
   const isOpen = row.open.includes(rowKey)
-  const room = row.columns - FRAME_COLUMNS - MARKER_COLUMNS - (trailing === undefined ? 0 : trailing.text.length + 1)
+  const room = row.columns - FRAME_COLUMNS - indent - MARKER_COLUMNS - (trailing === undefined ? 0 : trailing.text.length + 1)
   const label = truncate(title, room)
   const hidden = label === title ? null : title
   return (
@@ -86,7 +89,9 @@ function todoDetails(todo: ArcTodo, today: string): string[] {
   ]
 }
 
-function TodoRow({ row, todo, glyph, withDate }: { row: RowEnv; todo: ArcTodo; glyph: string; withDate: boolean }) {
+type TodoRowProps = { row: RowEnv; todo: ArcTodo; title: string; indent: number; glyph: string; withDate: boolean }
+
+function TodoRow({ row, todo, title, indent, glyph, withDate }: TodoRowProps) {
   const { Button } = row.ui
   const group = dueGroup(todo.date, row.today)
   return (
@@ -98,7 +103,8 @@ function TodoRow({ row, todo, glyph, withDate }: { row: RowEnv; todo: ArcTodo; g
           {glyph}
         </Button>
       }
-      title={todo.text}
+      title={title}
+      indent={indent}
       isDim={group === 'someday' && withDate}
       trailing={withDate && todo.date !== null ? { text: shortDate(todo.date, row.today), color: GROUP_COLOR[group] } : undefined}
       details={todoDetails(todo, row.today)}
@@ -119,10 +125,58 @@ function TaskRow({ row, task }: { row: RowEnv; task: ClaudeTask }) {
         </Text>
       }
       title={task.text}
+      indent={0}
       isDim={task.status === 'completed'}
       details={[TASK_WORD[task.status], 'Claude task']}
       body={task.detail}
     />
+  )
+}
+
+function Ruled({ row, ruleKey, indent, children }: { row: RowEnv; ruleKey: string; indent: number; children: JSX.Element[] }) {
+  const { Box, Text } = row.ui
+  const rule = RULE.repeat(Math.max(1, row.columns - FRAME_COLUMNS - indent))
+  return (
+    <Box flexDirection="column" paddingLeft={indent}>
+      {children.flatMap((child, i) =>
+        i === 0
+          ? [child]
+          : [
+              <Text key={`rule:${ruleKey}:${i}`} dimColor>
+                {rule}
+              </Text>,
+              child,
+            ],
+      )}
+    </Box>
+  )
+}
+
+function ProjectGroups({ row, todos, groupKey, glyph, withDate }: { row: RowEnv; todos: readonly ArcTodo[]; groupKey: string; glyph: string; withDate: boolean }) {
+  const { Box, Text } = row.ui
+  return (
+    <Box flexDirection="column">
+      {byProject(todos).map(({ project, rows }) => {
+        const indent = project === null ? 0 : PROJECT_INDENT
+        return (
+          <Box key={`project:${groupKey}:${project ?? ''}`} flexDirection="column">
+            {project !== null && (
+              <Box justifyContent="space-between">
+                <Text color="suggestion" bold>
+                  {project}
+                </Text>
+                <Text dimColor>{String(rows.length)}</Text>
+              </Box>
+            )}
+            <Ruled row={row} ruleKey={`${groupKey}:${project ?? ''}`} indent={indent}>
+              {rows.map(({ todo, title }) => (
+                <TodoRow row={row} todo={todo} title={title} indent={indent} glyph={glyph} withDate={withDate} />
+              ))}
+            </Ruled>
+          </Box>
+        )
+      })}
+    </Box>
   )
 }
 
@@ -205,16 +259,16 @@ export function FocusView({ row, arc, tasks }: { row: RowEnv; arc: ArcSnapshot; 
       <StoryHeader ui={ui} context={context} />
       {tasks.length > 0 && (
         <Section ui={ui} label="CLAUDE · THIS SESSION" color="claude">
-          {byStatus(tasks).map(task => (
-            <TaskRow row={row} task={task} />
-          ))}
+          <Ruled row={row} ruleKey="tasks" indent={0}>
+            {byStatus(tasks).map(task => (
+              <TaskRow row={row} task={task} />
+            ))}
+          </Ruled>
         </Section>
       )}
       {storyTodos.length > 0 && (
         <Section ui={ui} label="STORY TODOS" color="text">
-          {storyTodos.map(todo => (
-            <TodoRow row={row} todo={todo} glyph="▢" withDate={false} />
-          ))}
+          <ProjectGroups row={row} todos={storyTodos} groupKey="story" glyph="▢" withDate={false} />
         </Section>
       )}
       {tasks.length === 0 && storyTodos.length === 0 && (
@@ -244,9 +298,7 @@ export function OverviewView({ row, arc }: { row: RowEnv; arc: ArcSnapshot }) {
           <Text color={GROUP_COLOR[group]} italic>
             {group}
           </Text>
-          {members.map(todo => (
-            <TodoRow row={row} todo={todo} glyph="○" withDate />
-          ))}
+          <ProjectGroups row={row} todos={members} groupKey={group} glyph="○" withDate />
         </Box>
       ))}
       {arc.kind === 'loaded' && todos.length === 0 && (
