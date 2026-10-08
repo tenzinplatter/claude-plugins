@@ -1,6 +1,19 @@
 {
   "name": "agenda",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Toggleable agenda pane: a focus view of the current arc story and Claude's tasks, and an overview of every open todo",
-  "types": "./types/index.d.ts"
+  "author": {
+    "name": "tenzinplatter"
+  },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "dockColumns": {
+      "type": "number",
+      "title": "Dock width",
+      "description": "Columns the agenda asks for when docked beside the transcript (dragging the dock still wins)",
+      "default": 40,
+      "min": 24,
+      "max": 120
+    }
+  }
 }

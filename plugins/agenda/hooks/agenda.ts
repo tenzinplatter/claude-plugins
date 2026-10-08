@@ -89,10 +89,22 @@ export function latestNext(sessions: readonly string[]): string | null {
   return null
 }
 
-export function truncate(text: string, width: number): string {
-  const chars = [...text]
-  if (chars.length <= width) return text
-  return `${chars.slice(0, Math.max(1, width - 1)).join('')}…`
+export function wrapWords(text: string, width: number): string[] {
+  const room = Math.max(1, width)
+  const lines: string[] = []
+  let line = ''
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    const candidate = line === '' ? word : `${line} ${word}`
+    if ([...candidate].length <= room) {
+      line = candidate
+      continue
+    }
+    if (line !== '') lines.push(line)
+    const chars = [...word]
+    while (chars.length > room) lines.push(chars.splice(0, room).join(''))
+    line = chars.join('')
+  }
+  return line === '' && lines.length > 0 ? lines : [...lines, line]
 }
 
 export function toggled(keys: readonly string[], key: string): string[] {

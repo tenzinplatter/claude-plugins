@@ -1,7 +1,7 @@
 import type { BoxProps, ButtonProps, ElementConstructor, RenderChildren, TextProps } from 'claude-code'
 
 import type { ArcContext, ArcSnapshot, ArcTodo, ClaudeTask, Mode, TaskStatus } from '../types'
-import { byProject, byStatus, dueGroup, groupByDue, latestNext, shortDate, truncate, type DueGroup } from './agenda'
+import { byProject, byStatus, dueGroup, groupByDue, latestNext, shortDate, wrapWords, type DueGroup } from './agenda'
 
 export type Kit = {
   Box: ElementConstructor<BoxProps>
@@ -55,22 +55,27 @@ function ExpandableRow({ row, rowKey, marker, title, indent, isDim, trailing, de
   const { Box, Text, Button } = row.ui
   const isOpen = row.open.includes(rowKey)
   const room = row.columns - indent - MARKER_COLUMNS - (trailing === undefined ? 0 : trailing.text.length + 1)
-  const label = truncate(title, room)
-  const hidden = label === title ? null : title
+  const lines = wrapWords(title, room)
   return (
     <Box key={`row:${rowKey}`} flexDirection="column">
       <Box gap={1}>
         {marker}
-        <Box flexGrow={1}>
-          <Button key={`open:${rowKey}`} plain dimColor={isDim} onPress={() => row.actions.toggle(rowKey)}>
-            {label}
-          </Button>
+        <Box flexGrow={1} flexDirection="column">
+          {lines.map((line, i) => (
+            <Button
+              key={i === 0 ? `open:${rowKey}` : `open:${rowKey}:${i}`}
+              plain
+              dimColor={isDim}
+              onPress={() => row.actions.toggle(rowKey)}
+            >
+              {line}
+            </Button>
+          ))}
         </Box>
         {trailing !== undefined && <Text color={trailing.color}>{trailing.text}</Text>}
       </Box>
       {isOpen && (
         <Box key={`detail:${rowKey}`} flexDirection="column" paddingLeft={MARKER_COLUMNS} marginBottom={1}>
-          {hidden !== null && <Text wrap="wrap">{hidden}</Text>}
           {body !== null && <Text wrap="wrap">{body}</Text>}
           <Text dimColor wrap="wrap">
             {details.join(' · ')}

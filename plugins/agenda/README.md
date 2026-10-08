@@ -16,7 +16,11 @@ It opens in focus when the branch resolves to a story, and in overview otherwise
 | `/agenda add <text> [@YYYY-MM-DD]` | add a manual todo |
 | `/agenda refresh` | re-read arc |
 
-In the pane, click a row to expand its full text and details, and click its `▢`/`○` to complete it. Press `f`/`o` to switch modes and `r` to refresh.
+In the pane, titles wrap in full and the pane scrolls; click a title to expand its details, and click its `▢`/`○` to complete it. Press `f`/`o` to switch modes and `r` to refresh.
+
+## Settings
+
+`dockColumns` (in `/config`, default 40): the width the pane asks for when docked beside the transcript. Dragging the dock to another width wins.
 
 ## Requires
 

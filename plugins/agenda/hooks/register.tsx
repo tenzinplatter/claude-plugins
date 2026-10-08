@@ -8,6 +8,7 @@ import { FocusView, OverviewView, type Actions, type RowEnv } from './views'
 
 const PANE = 'agenda'
 const REFRESH_MS = 60_000
+const DEFAULT_DOCK_COLUMNS = 40
 const ARC_TIMEOUT_MS = 15_000
 const USAGE = 'Usage: /agenda [focus | overview | refresh | add <text> [@YYYY-MM-DD]]'
 
@@ -49,9 +50,9 @@ async function refreshIfOpen($: EngineInterface): Promise<void> {
   if (await isOpen($)) await refresh($)
 }
 
-async function show($: EngineInterface, next: Mode | null): Promise<void> {
+async function show($: EngineInterface, next: Mode | null, columns: number): Promise<void> {
   if (next !== null) await update($, mode, () => next)
-  await $.ui.open({ id: PANE, title: 'Agenda' })
+  await $.ui.open({ id: PANE, title: 'Agenda', columns })
   await refresh($)
 }
 
@@ -59,7 +60,9 @@ async function trackTasks($: EngineInterface, call: TaskCall): Promise<void> {
   await update($, tasks, list => applyTaskCall(list, call))
 }
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  const dockColumns = typeof options.dockColumns === 'number' ? options.dockColumns : DEFAULT_DOCK_COLUMNS
+
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'agenda',
@@ -80,11 +83,11 @@ export const register: Register = on => {
           await $.ui.close({ id: PANE })
           return { text: 'Agenda closed.' }
         }
-        await show($, null)
+        await show($, null, dockColumns)
         return { text: 'Agenda opened.' }
       case 'focus':
       case 'overview':
-        await show($, verb)
+        await show($, verb, dockColumns)
         return { text: `Agenda: ${verb}.` }
       case 'refresh':
         await refresh($)

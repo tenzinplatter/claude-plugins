@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On, ProcessRunResult } from 'claude-code'
 
-import { applyTaskCall, byProject, groupByDue, latestNext, parseAddArgs, truncate } from './agenda'
+import { applyTaskCall, byProject, groupByDue, latestNext, parseAddArgs, wrapWords } from './agenda'
 
 const TODAY = '2026-10-08'
 const PANE = {
@@ -44,7 +44,10 @@ function fakeArc(on: On, { inStory }: { inStory: boolean }): string[][] {
     return ran('')
   })
   on('ui.panes', () => ({ value: [] }))
-  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.open', ($, e) => {
+    calls.push(['ui.open', String(e.columns)])
+    return { value: { isPlaced: true } }
+  })
   on('command.register', ($, e) => ({ value: { command: e.name } }))
   mock.clock(on, { now: Date.parse(`${TODAY}T09:00:00`) })
   return calls
@@ -69,9 +72,11 @@ describe('agenda logic', () => {
     ])
   })
 
-  test('long titles are cut with an ellipsis', () => {
-    expect(truncate('short', 10)).toBe('short')
-    expect(truncate('a much longer title', 8)).toBe('a much …')
+  test('titles wrap on word boundaries and split words longer than a line', () => {
+    expect(wrapWords('short', 10)).toEqual(['short'])
+    expect(wrapWords('floor plane hip height in geometry', 12)).toEqual(['floor plane', 'hip height', 'in geometry'])
+    expect(wrapWords('~/cattle-recordings/fixed now', 10)).toEqual(['~/cattle-r', 'ecordings/', 'fixed now'])
+    expect(wrapWords('', 10)).toEqual([''])
   })
 
   test('todos group by how soon they are due', () => {
@@ -150,6 +155,31 @@ describe('agenda pane', () => {
 
     await ui.press({ key: 'open:task:1' })
     expect(await texts()).not.toContain('cover the pane on every surface')
+    await ui.unmount()
+  })
+
+  test('the dock asks for 40 columns by default', async ($, on) => {
+    const calls = fakeArc(on, { inStory: false })
+    await $.command.run({ command: 'agenda', args: '' } as never)
+    expect(calls).toContainEqual(['ui.open', '40'])
+  })
+
+  test('the dock width follows the dockColumns setting', { options: { dockColumns: 32 } }, async ($, on) => {
+    const calls = fakeArc(on, { inStory: false })
+    await $.command.run({ command: 'agenda', args: 'overview' } as never)
+    expect(calls).toContainEqual(['ui.open', '32'])
+  })
+
+  test('a long title wraps over several pressable lines', async ($, on) => {
+    fakeArc(on, { inStory: false })
+    await $.command.run({ command: 'agenda', args: '' } as never)
+    const narrow = { ...PANE, bodyColumns: 20 }
+    const ui = await $.ui.mount({ plugin: 'agenda', surface: 'terminal', component: 'Pane', requestId: 'agenda', props: narrow })
+    expect((await ui.find({ key: 'open:todo:d' }))?.text).toBe('Jetson: confirm')
+    expect((await ui.find({ key: 'open:todo:d:1' }))?.text).toBe('calibration')
+    await ui.press({ key: 'open:todo:d:1' })
+    const texts = (await ui.findAll({ type: 'Text' })).map(found => found.text)
+    expect(texts).toContain('no due date · manual todo')
     await ui.unmount()
   })
 
