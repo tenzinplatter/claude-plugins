@@ -24,7 +24,6 @@ export type RowEnv = {
   today: string
 }
 
-const FRAME_COLUMNS = 4
 const MARKER_COLUMNS = 2
 const PROJECT_INDENT = 1
 const RULE = '┈'
@@ -55,7 +54,7 @@ type RowProps = {
 function ExpandableRow({ row, rowKey, marker, title, indent, isDim, trailing, details, body }: RowProps) {
   const { Box, Text, Button } = row.ui
   const isOpen = row.open.includes(rowKey)
-  const room = row.columns - FRAME_COLUMNS - indent - MARKER_COLUMNS - (trailing === undefined ? 0 : trailing.text.length + 1)
+  const room = row.columns - indent - MARKER_COLUMNS - (trailing === undefined ? 0 : trailing.text.length + 1)
   const label = truncate(title, room)
   const hidden = label === title ? null : title
   return (
@@ -135,14 +134,14 @@ function TaskRow({ row, task }: { row: RowEnv; task: ClaudeTask }) {
 
 function Ruled({ row, ruleKey, indent, children }: { row: RowEnv; ruleKey: string; indent: number; children: JSX.Element[] }) {
   const { Box, Text } = row.ui
-  const rule = RULE.repeat(Math.max(1, row.columns - FRAME_COLUMNS - indent))
+  const rule = RULE.repeat(Math.max(1, row.columns - indent))
   return (
     <Box flexDirection="column" paddingLeft={indent}>
       {children.flatMap((child, i) =>
         i === 0
           ? [child]
           : [
-              <Text key={`rule:${ruleKey}:${i}`} dimColor>
+              <Text key={`rule:${ruleKey}:${i}`} dimColor wrap="truncate-end">
                 {rule}
               </Text>,
               child,
@@ -180,18 +179,27 @@ function ProjectGroups({ row, todos, groupKey, glyph, withDate }: { row: RowEnv;
   )
 }
 
-function Footer({ row, mode }: { row: RowEnv; mode: Mode }) {
+function Controls({ row, mode }: { row: RowEnv; mode: Mode }) {
   const { Box, Button } = row.ui
   const other: Mode = mode === 'focus' ? 'overview' : 'focus'
   return (
-    <Box marginTop={1} gap={1}>
-      <Button key="switch" hotkey={other[0]} onPress={() => row.actions.switchTo(other)}>
+    <Box gap={2}>
+      <Button key="switch" plain dimColor hotkey={other[0]} onPress={() => row.actions.switchTo(other)}>
         {other}
       </Button>
-      <Button key="refresh" hotkey="r" onPress={row.actions.refresh}>
+      <Button key="refresh" plain dimColor hotkey="r" onPress={row.actions.refresh}>
         refresh
       </Button>
     </Box>
+  )
+}
+
+function HeaderRule({ row, glyph, color }: { row: RowEnv; glyph: string; color: TextProps['color'] }) {
+  const { Text } = row.ui
+  return (
+    <Text color={color} wrap="truncate-end">
+      {glyph.repeat(Math.max(1, row.columns))}
+    </Text>
   )
 }
 
@@ -207,36 +215,31 @@ function Section({ ui, label, color, children }: { ui: Kit; label: string; color
   )
 }
 
-function StoryHeader({ ui, context }: { ui: Kit; context: ArcContext | null }) {
-  const { Box, Text } = ui
-  if (context === null) {
-    return (
-      <Box flexDirection="column">
-        <Box backgroundColor="claude" paddingX={1}>
-          <Text color="inverseText" bold>
-            ◉ FOCUS
-          </Text>
-        </Box>
-        <Text dimColor>no arc story for this branch</Text>
-      </Box>
-    )
-  }
-  const { story, branch } = context
-  const next = latestNext(context.sessions)
+function FocusHeader({ row, context }: { row: RowEnv; context: ArcContext | null }) {
+  const { Box, Text } = row.ui
+  const next = context === null ? null : latestNext(context.sessions)
   return (
     <Box flexDirection="column">
       <Box backgroundColor="claude" paddingX={1} justifyContent="space-between">
         <Text color="inverseText" bold>
-          ◉ FOCUS sc-{String(story.id)}
+          {context === null ? '◉ FOCUS' : `◉ FOCUS sc-${context.story.id}`}
         </Text>
-        <Text color="inverseText">{story.state ?? ''}</Text>
+        <Text color="inverseText">{context?.story.state ?? ''}</Text>
       </Box>
-      <Text bold wrap="truncate-end">
-        {story.name ?? `story ${story.id}`}
-      </Text>
-      <Text dimColor wrap="truncate-middle">
-        {branch}
-      </Text>
+      <Controls row={row} mode="focus" />
+      <HeaderRule row={row} glyph="━" color="claude" />
+      {context === null ? (
+        <Text dimColor>no arc story for this branch</Text>
+      ) : (
+        <Box flexDirection="column">
+          <Text bold wrap="wrap">
+            {context.story.name ?? `story ${context.story.id}`}
+          </Text>
+          <Text dimColor wrap="truncate-middle">
+            {context.branch}
+          </Text>
+        </Box>
+      )}
       {next !== null && (
         <Box marginTop={1} gap={1}>
           <Text color="claude" bold>
@@ -255,8 +258,8 @@ export function FocusView({ row, arc, tasks }: { row: RowEnv; arc: ArcSnapshot; 
   const context = arc.kind === 'loaded' ? arc.context : null
   const storyTodos = arc.kind === 'loaded' && context !== null ? arc.todos.filter(t => t.note === context.note) : []
   return (
-    <Box key="focus" flexDirection="column" borderStyle="bold" borderColor="claude" paddingX={1}>
-      <StoryHeader ui={ui} context={context} />
+    <Box key="focus" flexDirection="column">
+      <FocusHeader row={row} context={context} />
       {tasks.length > 0 && (
         <Section ui={ui} label="CLAUDE · THIS SESSION" color="claude">
           <Ruled row={row} ruleKey="tasks" indent={0}>
@@ -277,7 +280,6 @@ export function FocusView({ row, arc, tasks }: { row: RowEnv; arc: ArcSnapshot; 
         </Box>
       )}
       <ArcStatus ui={ui} arc={arc} />
-      <Footer row={row} mode="focus" />
     </Box>
   )
 }
@@ -288,11 +290,20 @@ export function OverviewView({ row, arc }: { row: RowEnv; arc: ArcSnapshot }) {
   const todos = arc.kind === 'loaded' ? arc.todos : []
   const context = arc.kind === 'loaded' ? arc.context : null
   return (
-    <Box key="overview" flexDirection="column" borderStyle="round" borderColor="subtle" paddingX={1}>
+    <Box key="overview" flexDirection="column">
       <Box justifyContent="space-between">
-        <Text color="subtle">◇ overview</Text>
+        <Text color="subtle" bold>
+          ◇ overview
+        </Text>
         <Text dimColor>{todos.length} open</Text>
       </Box>
+      <Controls row={row} mode="overview" />
+      <HeaderRule row={row} glyph="─" color="subtle" />
+      {context !== null && (
+        <Text dimColor wrap="truncate-end">
+          ↳ in focus: sc-{String(context.story.id)} {context.story.name ?? ''}
+        </Text>
+      )}
       {groupByDue(todos, row.today).map(([group, members]) => (
         <Box key={`group:${group}`} flexDirection="column" marginTop={1}>
           <Text color={GROUP_COLOR[group]} italic>
@@ -306,15 +317,7 @@ export function OverviewView({ row, arc }: { row: RowEnv; arc: ArcSnapshot }) {
           <Text dimColor>no open todos</Text>
         </Box>
       )}
-      {context !== null && (
-        <Box marginTop={1}>
-          <Text dimColor wrap="truncate-end">
-            ↳ in focus: sc-{String(context.story.id)} {context.story.name ?? ''}
-          </Text>
-        </Box>
-      )}
       <ArcStatus ui={ui} arc={arc} />
-      <Footer row={row} mode="overview" />
     </Box>
   )
 }

@@ -2,8 +2,8 @@
 
 A pane with two modes:
 
-- **focus**: heavy `claude`-coloured frame. Shows the arc story for the current branch, the `Next` from its latest handoff, Claude's own tasks (mirrored live from `TaskCreate`/`TaskUpdate`/`TodoWrite`, in-progress first) and then the story note's open todos.
-- **overview**: quiet rounded frame. Shows every open arc todo grouped by when it's due: overdue, today, this week, later, someday.
+- **focus**: full-width `claude`-coloured header bar and heavy rule. Shows the arc story for the current branch, the `Next` from its latest handoff, Claude's own tasks (mirrored live from `TaskCreate`/`TaskUpdate`/`TodoWrite`, in-progress first) and then the story note's open todos.
+- **overview**: quiet muted header and thin rule. Shows every open arc todo grouped by when it's due: overdue, today, this week, later, someday.
 
 It opens in focus when the branch resolves to a story, and in overview otherwise.
 
