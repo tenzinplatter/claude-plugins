@@ -274,7 +274,7 @@ function FocusHeader({ row, context, repo }: { row: RowEnv; context: ArcContext 
       <HeaderRule row={row} glyph="━" color="claude" />
       {context === null ? (
         <Text dimColor wrap="truncate-middle">
-          {repo ?? 'not in a git repo'}
+          {repo ?? 'no repo scope: todos here are global'}
         </Text>
       ) : (
         <Box flexDirection="column">

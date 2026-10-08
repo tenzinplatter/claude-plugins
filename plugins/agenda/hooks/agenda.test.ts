@@ -36,8 +36,8 @@ const TODOS: ArcTodo[] = [
   todo('c', 'reply re: epics', { date: '2026-10-01' }),
   todo('d', 'stockeye: Jetson: confirm calibration'),
   todo('e', 'stockeye: re-cut clips'),
-  todo('f', 'wire the notifier', { note: 'todos/tenzinplatter-hearth.md', repo: HEARTH, session: 'sess-other' }),
-  todo('g', 'from this session', { note: 'todos/tenzinplatter-hearth.md', repo: HEARTH, session: SESSION }),
+  todo('f', 'wire the notifier', { note: 'todos/github.com/tenzinplatter/hearth.md', repo: HEARTH, session: 'sess-other' }),
+  todo('g', 'from this session', { note: 'todos/github.com/tenzinplatter/hearth.md', repo: HEARTH, session: SESSION }),
 ]
 
 function ran(stdout: string): { value: ProcessRunResult } {
@@ -251,6 +251,17 @@ describe('agenda pane', () => {
       ['ship it', SESSION, '/home/t/code/hearth'],
       ['elsewhere', 'given', '/srv/other'],
     ])
+  })
+
+  test('a repo without an origin gets no repo scope, and says so', async ($, on) => {
+    fakeArc(on, { inStory: false, repo: null })
+    await $.command.run({ command: 'agenda', args: 'focus' } as never)
+    const ui = await $.ui.mount({ plugin: 'agenda', surface: 'terminal', component: 'Pane', requestId: 'agenda', props: PANE })
+    const shown = await texts(ui)
+    expect(shown).toContain('◉ FOCUS')
+    expect(shown).toContain('no repo scope: todos here are global')
+    expect(shown.some(text => text.startsWith('REPO ·'))).toBe(false)
+    await ui.unmount()
   })
 
   test('an arc that still prints a bare list says to reinstall it', async ($, on) => {

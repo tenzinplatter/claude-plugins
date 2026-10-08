@@ -24,4 +24,4 @@ In the pane, titles wrap in full and the pane scrolls; click a title to expand i
 
 ## Requires
 
-`arc` on `PATH` with repo-scoped todos (`arc todo list` printing `{ repo, todos }`). `/agenda add` and Claude's `add_todo` calls through arc's MCP server are tagged with this session and scoped to the session's repo. The pane refreshes every minute while open, and after Bash and `mcp__arc__*` tool calls.
+`arc` on `PATH` with repo-scoped todos (`arc todo list` printing `{ repo, todos }`). `/agenda add` and Claude's `add_todo` calls through arc's MCP server are tagged with this session and scoped to the session's repo by its origin remote (a repo without one gets global todos). The pane refreshes every minute while open, and after Bash and `mcp__arc__*` tool calls.
