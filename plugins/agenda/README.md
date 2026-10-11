@@ -16,7 +16,7 @@ It opens in focus when the branch resolves to a story, and in overview otherwise
 | `/agenda add <text> [@YYYY-MM-DD]` | add a manual todo |
 | `/agenda refresh` | re-read arc |
 
-In the pane, titles wrap in full and the pane scrolls; click a title to expand its details, and click its `▢`/`○` to complete it. Press `f`/`o` to switch modes and `r` to refresh.
+In the pane, titles wrap in full and the pane scrolls; click its `▢`/`○` to complete a todo. Click a title to fill the pane with that todo or task: its title, description, details and any subtodos, which open the same way. `← back` (or `b`) returns to the parent todo, or to the list. Lists show only top-level todos, with `▸n` counting a todo's open subtodos. Press `f`/`o` to switch modes and `r` to refresh.
 
 ## Settings
 
@@ -24,4 +24,4 @@ In the pane, titles wrap in full and the pane scrolls; click a title to expand i
 
 ## Requires
 
-`arc` on `PATH` with repo-scoped todos (`arc todo list` printing `{ repo, todos }`). `/agenda add` and Claude's `add_todo` calls through arc's MCP server are tagged with this session and scoped to the session's repo by its origin remote (a repo without one gets global todos). The pane refreshes every minute while open, and after Bash and `mcp__arc__*` tool calls.
+`arc` on `PATH` with repo-scoped, nestable todos (`arc todo list` printing `{ repo, todos }` with each todo's `parent` and `description`). `/agenda add` and Claude's `add_todo` calls through arc's MCP server are tagged with this session and scoped to the session's repo by its origin remote (a repo without one gets global todos). The pane refreshes every minute while open, and after Bash and `mcp__arc__*` tool calls.

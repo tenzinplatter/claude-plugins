@@ -27,7 +27,7 @@ const CONTEXT = {
 }
 
 function todo(id: string, text: string, fields: Partial<ArcTodo> = {}): ArcTodo {
-  return { id, text, date: null, note: 'todos.md', repo: null, session: null, ...fields }
+  return { id, parent: null, text, description: null, date: null, note: 'todos.md', repo: null, session: null, ...fields }
 }
 
 const TODOS: ArcTodo[] = [
@@ -185,7 +185,7 @@ describe('agenda pane', () => {
     })
   }
 
-  test('an expanded row says where the todo came from and which session added it', async ($, on) => {
+  test('pressing a row fills the pane with its detail, and back returns to the list', async ($, on) => {
     fakeArc(on, { inStory: true, repo: HEARTH })
     on('tool.call', { tool: 'TaskCreate' }, () => ({ result: { task: { id: '1', subject: 'write tests' } } }))
     await $.command.run({ command: 'agenda', args: 'focus' } as never)
@@ -195,16 +195,52 @@ describe('agenda pane', () => {
     expect(await texts(ui)).not.toContain('cover the pane on every surface')
 
     await ui.press({ key: 'open:task:1' })
-    expect(await texts(ui)).toContain('cover the pane on every surface')
-    await ui.press({ key: 'open:todo:a' })
-    expect(await texts(ui)).toContain('no due date · stories/depth-align.md')
-    await ui.press({ key: 'open:todo:g' })
-    expect(await texts(ui)).toContain('no due date · repo hearth · added this session')
-    await ui.press({ key: 'open:todo:f' })
-    expect(await texts(ui)).toContain('no due date · repo hearth · added in another session')
+    let shown = await texts(ui)
+    expect(shown).toContain('cover the pane on every surface')
+    expect(shown).not.toContain('STORY TODOS')
+    await ui.press({ key: 'back' })
 
-    await ui.press({ key: 'open:task:1' })
-    expect(await texts(ui)).not.toContain('cover the pane on every surface')
+    for (const [key, details] of [
+      ['open:todo:a', 'no due date · stories/depth-align.md'],
+      ['open:todo:g', 'no due date · repo hearth · added this session'],
+      ['open:todo:f', 'no due date · repo hearth · added in another session'],
+    ] as const) {
+      await ui.press({ key })
+      shown = await texts(ui)
+      expect(shown).toContain(details)
+      expect(shown).toContain('no description')
+      await ui.press({ key: 'back' })
+    }
+    expect(await texts(ui)).toContain('STORY TODOS')
+    await ui.unmount()
+  })
+
+  test('subtodos hide under their parent, open from its detail, and go back to it', async ($, on) => {
+    const listing = {
+      repo: null,
+      todos: [
+        todo('p', 'ship the pane', { description: 'clicking takes over the pane' }),
+        todo('c', 'write the detail view', { parent: 'p', description: 'with a back arrow' }),
+        todo('o', 'orphan of a done parent', { parent: 'gone' }),
+      ],
+    }
+    const calls = fakeArc(on, { inStory: false, listing })
+    await $.command.run({ command: 'agenda', args: 'overview' } as never)
+
+    const ui = await $.ui.mount({ plugin: 'agenda', surface: 'terminal', component: 'Pane', requestId: 'agenda', props: PANE })
+    expect(await ui.find({ key: 'open:todo:c' })).toBeUndefined()
+    expect((await ui.find({ key: 'open:todo:o' }))?.text).toBe('orphan of a done parent')
+    expect(await texts(ui)).toContain('▸1')
+
+    await ui.press({ key: 'open:todo:p' })
+    expect(await texts(ui)).toContain('clicking takes over the pane')
+    await ui.press({ key: 'open:todo:c' })
+    expect(await texts(ui)).toContain('with a back arrow')
+    await ui.press({ key: 'back' })
+    expect(await texts(ui)).toContain('clicking takes over the pane')
+
+    await ui.press({ key: 'done:p' })
+    expect(calls).toContainEqual(['arc', 'todo', 'done', 'p'])
     await ui.unmount()
   })
 

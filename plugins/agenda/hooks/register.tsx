@@ -1,10 +1,10 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { ArcSnapshot, ClaudeTask, Mode } from '../types'
-import { applyTaskCall, localDate, parseAddArgs, toggled, type TaskCall } from './agenda'
+import type { ArcSnapshot, ClaudeTask, Mode, Selection } from '../types'
+import { applyTaskCall, detailOf, localDate, parseAddArgs, type TaskCall } from './agenda'
 import { CONTEXT_ARGV, INSTALL_HINT, LIST_ARGV, addArgv, doneArgv, failure, snapshotFrom } from './arc'
-import { FocusView, OverviewView, RIGHT_PADDING, type Actions, type RowEnv } from './views'
+import { DetailView, FocusView, OverviewView, RIGHT_PADDING, type Actions, type RowEnv } from './views'
 
 const PANE = 'agenda'
 const REFRESH_MS = 60_000
@@ -15,7 +15,7 @@ const USAGE = 'Usage: /agenda [focus | overview | refresh | add <text> [@YYYY-MM
 const mode = atom({ plugin: 'agenda', key: 'mode' } as const, null as Mode | null)
 const tasks = atom({ plugin: 'agenda', key: 'tasks' } as const, [] as ClaudeTask[])
 const arc = atom({ plugin: 'agenda', key: 'arc' } as const, { kind: 'loading' } as ArcSnapshot)
-const expanded = atom({ plugin: 'agenda', key: 'expanded' } as const, [] as string[])
+const selected = atom({ plugin: 'agenda', key: 'selected' } as const, null as Selection | null)
 
 async function isOpen($: EngineInterface): Promise<boolean> {
   return (await $.ui.panes()).some(pane => pane.id === PANE)
@@ -154,19 +154,23 @@ export const register: Register = (on, options) => {
         await writeArc($, doneArgv(id)).catch(error => $.ui.toast(`agenda: ${error instanceof Error ? error.message : error}`))
         await refresh($)
       },
-      toggle: key => update($, expanded, keys => toggled(keys, key)).then(() => undefined),
+      select: selection => update($, selected, () => selection).then(() => undefined),
       switchTo: next => update($, mode, () => next).then(() => undefined),
       refresh: () => refresh($),
     }
+    const todos = snapshot.kind === 'loaded' ? snapshot.todos : []
     const row: RowEnv = {
       ui,
       actions,
-      open: await read($, expanded),
+      todos,
       columns: e.props.bodyColumns - RIGHT_PADDING,
       today: localDate(await $.clock.now()),
       session: await $.session.id(),
     }
-    if (shown === 'focus') return <FocusView row={row} arc={snapshot} tasks={await read($, tasks)} />
+    const claudeTasks = await read($, tasks)
+    const detail = detailOf(await read($, selected), todos, claudeTasks)
+    if (detail !== null) return <DetailView row={row} detail={detail} />
+    if (shown === 'focus') return <FocusView row={row} arc={snapshot} tasks={claudeTasks} />
     return <OverviewView row={row} arc={snapshot} />
   })
 }

@@ -1,4 +1,4 @@
-import type { ArcTodo, ClaudeTask, TaskStatus } from '../types'
+import type { ArcTodo, ClaudeTask, Selection, TaskStatus } from '../types'
 
 export type DueGroup = 'overdue' | 'today' | 'this week' | 'later' | 'someday'
 
@@ -107,8 +107,30 @@ export function wrapWords(text: string, width: number): string[] {
   return line === '' && lines.length > 0 ? lines : [...lines, line]
 }
 
-export function toggled(keys: readonly string[], key: string): string[] {
-  return keys.includes(key) ? keys.filter(k => k !== key) : [...keys, key]
+export function roots(todos: readonly ArcTodo[]): ArcTodo[] {
+  const ids = new Set(todos.map(todo => todo.id))
+  return todos.filter(todo => todo.parent === null || !ids.has(todo.parent))
+}
+
+export function childrenOf(todos: readonly ArcTodo[], id: string): ArcTodo[] {
+  return todos.filter(todo => todo.parent === id)
+}
+
+export type Detail =
+  | { kind: 'todo'; todo: ArcTodo; children: ArcTodo[]; back: Selection | null }
+  | { kind: 'task'; task: ClaudeTask; back: null }
+
+export function detailOf(selected: Selection | null, todos: readonly ArcTodo[], tasks: readonly ClaudeTask[]): Detail | null {
+  if (selected === null) return null
+  if (selected.kind === 'task') {
+    const task = tasks.find(task => task.id === selected.id)
+    return task === undefined ? null : { kind: 'task', task, back: null }
+  }
+  const todo = todos.find(todo => todo.id === selected.id)
+  if (todo === undefined) return null
+  const parent = todos.find(other => other.id === todo.parent)
+  const back = parent === undefined ? null : ({ kind: 'todo', id: parent.id } as const)
+  return { kind: 'todo', todo, children: childrenOf(todos, todo.id), back }
 }
 
 const PROJECT_PREFIX = /^([A-Za-z0-9][\w.-]{0,31}):\s+(\S.*)$/s

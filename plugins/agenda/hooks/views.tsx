@@ -1,16 +1,19 @@
 import type { BoxProps, ButtonProps, ElementConstructor, RenderChildren, TextProps } from 'claude-code'
 
-import type { ArcContext, ArcSnapshot, ArcTodo, ClaudeTask, Mode, TaskStatus } from '../types'
+import type { ArcContext, ArcSnapshot, ArcTodo, ClaudeTask, Mode, Selection, TaskStatus } from '../types'
 import {
   byProject,
   byStatus,
+  childrenOf,
   dueGroup,
   focusSections,
   groupByDue,
   latestNext,
   repoName,
+  roots,
   shortDate,
   wrapWords,
+  type Detail,
   type DueGroup,
 } from './agenda'
 
@@ -22,7 +25,7 @@ export type Kit = {
 
 export type Actions = {
   complete: (id: string) => Promise<void>
-  toggle: (key: string) => Promise<void>
+  select: (selection: Selection | null) => Promise<void>
   switchTo: (mode: Mode) => Promise<void>
   refresh: () => Promise<void>
 }
@@ -30,7 +33,7 @@ export type Actions = {
 export type RowEnv = {
   ui: Kit
   actions: Actions
-  open: readonly string[]
+  todos: readonly ArcTodo[]
   columns: number
   today: string
   session: string
@@ -52,49 +55,42 @@ const GROUP_COLOR: Record<DueGroup, TextProps['color']> = {
   someday: 'inactive',
 }
 
+type Trailing = { text: string; color: TextProps['color'] }
+
 type RowProps = {
   row: RowEnv
-  rowKey: string
+  selection: Selection
   marker: RenderChildren
   title: string
   indent: number
   isDim?: boolean
-  trailing?: { text: string; color: TextProps['color'] }
-  details: readonly string[]
-  body: string | null
+  trailing: readonly Trailing[]
 }
 
-function ExpandableRow({ row, rowKey, marker, title, indent, isDim, trailing, details, body }: RowProps) {
+function Row({ row, selection, marker, title, indent, isDim, trailing }: RowProps) {
   const { Box, Text, Button } = row.ui
-  const isOpen = row.open.includes(rowKey)
-  const room = row.columns - indent - MARKER_COLUMNS - (trailing === undefined ? 0 : trailing.text.length + 1)
-  const lines = wrapWords(title, room)
+  const rowKey = `${selection.kind}:${selection.id}`
+  const room = row.columns - indent - MARKER_COLUMNS - trailing.reduce((width, t) => width + t.text.length + 1, 0)
   return (
-    <Box key={`row:${rowKey}`} flexDirection="column">
-      <Box gap={1}>
-        {marker}
-        <Box flexGrow={1} flexDirection="column">
-          {lines.map((line, i) => (
-            <Button
-              key={i === 0 ? `open:${rowKey}` : `open:${rowKey}:${i}`}
-              plain
-              dimColor={isDim}
-              onPress={() => row.actions.toggle(rowKey)}
-            >
-              {line}
-            </Button>
-          ))}
-        </Box>
-        {trailing !== undefined && <Text color={trailing.color}>{trailing.text}</Text>}
+    <Box key={`row:${rowKey}`} gap={1}>
+      {marker}
+      <Box flexGrow={1} flexDirection="column">
+        {wrapWords(title, room).map((line, i) => (
+          <Button
+            key={i === 0 ? `open:${rowKey}` : `open:${rowKey}:${i}`}
+            plain
+            dimColor={isDim}
+            onPress={() => row.actions.select(selection)}
+          >
+            {line}
+          </Button>
+        ))}
       </Box>
-      {isOpen && (
-        <Box key={`detail:${rowKey}`} flexDirection="column" paddingLeft={MARKER_COLUMNS} marginBottom={1}>
-          {body !== null && <Text wrap="wrap">{body}</Text>}
-          <Text dimColor wrap="wrap">
-            {details.join(' · ')}
-          </Text>
-        </Box>
-      )}
+      {trailing.map(t => (
+        <Text key={`trailing:${rowKey}:${t.text}`} color={t.color} dimColor={t.color === undefined}>
+          {t.text}
+        </Text>
+      ))}
     </Box>
   )
 }
@@ -117,10 +113,15 @@ type TodoRowProps = { row: RowEnv; todo: ArcTodo; title: string; indent: number;
 function TodoRow({ row, todo, title, indent, glyph, withDate }: TodoRowProps) {
   const { Button } = row.ui
   const group = dueGroup(todo.date, row.today)
+  const children = childrenOf(row.todos, todo.id).length
+  const trailing: Trailing[] = [
+    ...(children === 0 ? [] : [{ text: `▸${children}`, color: undefined }]),
+    ...(withDate && todo.date !== null ? [{ text: shortDate(todo.date, row.today), color: GROUP_COLOR[group] }] : []),
+  ]
   return (
-    <ExpandableRow
+    <Row
       row={row}
-      rowKey={`todo:${todo.id}`}
+      selection={{ kind: 'todo', id: todo.id }}
       marker={
         <Button key={`done:${todo.id}`} plain onPress={() => row.actions.complete(todo.id)}>
           {glyph}
@@ -129,29 +130,30 @@ function TodoRow({ row, todo, title, indent, glyph, withDate }: TodoRowProps) {
       title={title}
       indent={indent}
       isDim={group === 'someday' && withDate}
-      trailing={withDate && todo.date !== null ? { text: shortDate(todo.date, row.today), color: GROUP_COLOR[group] } : undefined}
-      details={todoDetails(todo, row)}
-      body={null}
+      trailing={trailing}
     />
   )
 }
 
-function TaskRow({ row, task }: { row: RowEnv; task: ClaudeTask }) {
-  const { Text } = row.ui
+function TaskMarker({ ui, task }: { ui: Kit; task: ClaudeTask }) {
+  const { Text } = ui
   return (
-    <ExpandableRow
+    <Text color={task.status === 'in_progress' ? 'claude' : undefined} dimColor={task.status === 'completed'}>
+      {TASK_GLYPH[task.status]}
+    </Text>
+  )
+}
+
+function TaskRow({ row, task }: { row: RowEnv; task: ClaudeTask }) {
+  return (
+    <Row
       row={row}
-      rowKey={`task:${task.id}`}
-      marker={
-        <Text color={task.status === 'in_progress' ? 'claude' : undefined} dimColor={task.status === 'completed'}>
-          {TASK_GLYPH[task.status]}
-        </Text>
-      }
+      selection={{ kind: 'task', id: task.id }}
+      marker={<TaskMarker ui={row.ui} task={task} />}
       title={task.text}
       indent={0}
       isDim={task.status === 'completed'}
-      details={[TASK_WORD[task.status], 'Claude task']}
-      body={task.detail}
+      trailing={[]}
     />
   )
 }
@@ -304,7 +306,7 @@ export function FocusView({ row, arc, tasks }: { row: RowEnv; arc: ArcSnapshot; 
   const context = arc.kind === 'loaded' ? arc.context : null
   const repo = arc.kind === 'loaded' ? arc.repo : null
   const place = { session: row.session, storyNote: context?.note ?? null, repo }
-  const sections = focusSections(arc.kind === 'loaded' ? arc.todos : [], place)
+  const sections = focusSections(roots(row.todos), place)
   const isEmpty = tasks.length + sections.session.length + sections.story.length + sections.repo.length === 0
   return (
     <Box key="focus" flexDirection="column" paddingRight={RIGHT_PADDING}>
@@ -340,7 +342,7 @@ export function FocusView({ row, arc, tasks }: { row: RowEnv; arc: ArcSnapshot; 
 export function OverviewView({ row, arc }: { row: RowEnv; arc: ArcSnapshot }) {
   const { ui } = row
   const { Box, Text } = ui
-  const todos = arc.kind === 'loaded' ? arc.todos : []
+  const todos = roots(row.todos)
   const context = arc.kind === 'loaded' ? arc.context : null
   return (
     <Box key="overview" flexDirection="column" paddingRight={RIGHT_PADDING}>
@@ -371,6 +373,79 @@ export function OverviewView({ row, arc }: { row: RowEnv; arc: ArcSnapshot }) {
         </Box>
       )}
       <ArcStatus ui={ui} arc={arc} />
+    </Box>
+  )
+}
+
+function DetailBody({ row, detail }: { row: RowEnv; detail: Detail }) {
+  const { Box, Text, Button } = row.ui
+  if (detail.kind === 'task') {
+    const { task } = detail
+    return (
+      <Box flexDirection="column">
+        <Box gap={1}>
+          <TaskMarker ui={row.ui} task={task} />
+          <Text bold wrap="wrap">
+            {task.text}
+          </Text>
+        </Box>
+        <Description ui={row.ui} text={task.detail} />
+        <Text dimColor wrap="wrap">
+          {[TASK_WORD[task.status], 'Claude task'].join(' · ')}
+        </Text>
+      </Box>
+    )
+  }
+  const { todo, children, back } = detail
+  return (
+    <Box flexDirection="column">
+      <Box gap={1}>
+        <Button
+          key={`done:${todo.id}`}
+          plain
+          onPress={() => row.actions.complete(todo.id).then(() => row.actions.select(back))}
+        >
+          ▢
+        </Button>
+        <Text bold wrap="wrap">
+          {todo.text}
+        </Text>
+      </Box>
+      <Description ui={row.ui} text={todo.description} />
+      <Text dimColor wrap="wrap">
+        {todoDetails(todo, row).join(' · ')}
+      </Text>
+      {children.length > 0 && (
+        <Section ui={row.ui} label="SUBTODOS" color="text">
+          <Ruled row={row} ruleKey={`children:${todo.id}`} indent={0}>
+            {children.map(child => (
+              <TodoRow row={row} todo={child} title={child.text} indent={0} glyph="▢" withDate />
+            ))}
+          </Ruled>
+        </Section>
+      )}
+    </Box>
+  )
+}
+
+function Description({ ui, text }: { ui: Kit; text: string | null }) {
+  const { Box, Text } = ui
+  return (
+    <Box marginY={1}>
+      {text === null ? <Text dimColor>no description</Text> : <Text wrap="wrap">{text}</Text>}
+    </Box>
+  )
+}
+
+export function DetailView({ row, detail }: { row: RowEnv; detail: Detail }) {
+  const { Box, Button } = row.ui
+  return (
+    <Box key="detail" flexDirection="column" paddingRight={RIGHT_PADDING}>
+      <Button key="back" plain dimColor hotkey="b" onPress={() => row.actions.select(detail.back)}>
+        ← back
+      </Button>
+      <HeaderRule row={row} glyph="─" color="subtle" />
+      <DetailBody row={row} detail={detail} />
     </Box>
   )
 }

@@ -6,12 +6,16 @@ export type ClaudeTask = { id: string; text: string; detail: string | null; stat
 
 export type ArcTodo = {
   id: string
+  parent: string | null
   text: string
+  description: string | null
   date: string | null
   note: string
   repo: string | null
   session: string | null
 }
+
+export type Selection = { kind: 'todo' | 'task'; id: string }
 
 export type ArcListing = { repo: string | null; todos: ArcTodo[] }
 
@@ -40,7 +44,7 @@ declare module 'claude-code' {
       mode: Mode | null
       tasks: ClaudeTask[]
       arc: ArcSnapshot
-      expanded: string[]
+      selected: Selection | null
     }
   }
 }
